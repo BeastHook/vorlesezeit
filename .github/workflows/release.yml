@@ -23,8 +23,6 @@ jobs:
         run: |
           version=$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
           test "v$version" = "$GITHUB_REF_NAME"
-      - name: ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: S3-Speicher fuer die Speichertests (feste Entwicklungswerte wie docker-compose.yml)
         run: |
           docker run -d --name s3 -p 9000:7070 \
@@ -34,10 +32,16 @@ jobs:
             -c 'mkdir -p /data/vorlesezeit-test && exec versitygw --health /health posix /data'
           for i in $(seq 60); do curl -sf http://localhost:9000/health && exit 0; sleep 1; done
           docker logs s3; exit 1
-      - run: pip install -e ".[dev]"
-      - run: ruff check .
-      - run: ruff format --check app tests scripts
-      - run: pytest -q
+      # Tests im Basis-Image der App: dasselbe ffmpeg wie in Produktion
+      # (Ubuntus ffmpeg 6.1 meldet im loudnorm-Messlauf keine Dauer).
+      - name: Lint und Tests
+        run: |
+          docker run --rm --network host -v "$PWD:/w" -w /w python:3.12-slim sh -ec '
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null
+            pip install -q -e ".[dev]"
+            ruff check .
+            ruff format --check app tests scripts
+            pytest -q'
 
   image:
     needs: test
