@@ -3,7 +3,7 @@
 #   docker compose -f docker-compose.heimserver.yml --env-file .env.heimserver up -d --build
 #
 # Kein Dienst veroeffentlicht einen Port: die App ist nur ueber den Cloudflare
-# Tunnel erreichbar (KTD15), MinIO nur im internen Netz (KTD17). Alle Werte
+# Tunnel erreichbar (KTD15), der Objektspeicher nur im internen Netz (KTD17). Alle Werte
 # kommen aus der Umgebung; fehlt ein Pflichtwert, bricht compose schon beim
 # Einlesen ab. Die eingecheckten Entwicklungswerte aus docker-compose.yml
 # gelten hier nicht.
@@ -15,46 +15,38 @@
 name: vorlesezeit-heimserver
 
 x-storage-env: &storage-env
-  STORAGE_ENDPOINT_URL: http://minio:9000
-  STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt (eigener MinIO-Benutzer)}
-  STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt (langes Zufallspasswort fuer MinIO)}
+  STORAGE_ENDPOINT_URL: http://s3:7070
+  STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt (Zugang zum Objektspeicher)}
+  STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt (langes Zufallspasswort)}
   STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET fehlt}
   STORAGE_REGION: us-east-1
 
 services:
-  minio:
-    image: quay.io/minio/minio:latest
-    command: server /data
+  s3:
+    # versitygw statt MinIO seit 2026-10 (MinIO-Images nicht mehr ladbar).
+    image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
+    # Der Bucket ist ein Verzeichnis; mkdir legt ihn an, kein eigener Dienst
+    # mit Client noetig. $$: die Shell im Container setzt den Wert ein.
+    entrypoint: ["sh", "-c", "mkdir -p \"/data/$$STORAGE_BUCKET\" && exec versitygw --health /health posix /data"]
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt}
-      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt}
+      ROOT_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt}
+      ROOT_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET fehlt}
     volumes:
-      - minio-data:/data
-
-  createbuckets:
-    image: quay.io/minio/mc:latest
-    depends_on:
-      - minio
-    environment:
-      <<: *storage-env
-    # $$: die Shell im Container setzt die Werte ein, nicht compose -- so
-    # stehen die Zugangsdaten nicht in der Kommandozeile des Containers.
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 \"$$STORAGE_ACCESS_KEY\" \"$$STORAGE_SECRET_KEY\" >/dev/null; do
-        echo 'warte auf minio...'; sleep 1;
-      done;
-      mc mb --ignore-existing \"local/$$STORAGE_BUCKET\";
-      "
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7070/health"]
+      interval: 10s
+      retries: 6
 
   app:
     build: .
     image: vorlesezeit-heimserver
     restart: unless-stopped
     depends_on:
-      createbuckets:
-        condition: service_completed_successfully
+      s3:
+        condition: service_healthy
     environment:
       <<: *storage-env
       APP_TIMEZONE: Europe/Berlin
@@ -138,9 +130,11 @@ volumes:
   db-data:
     external: true
     name: toniapply-heimserver_db-data
-  minio-data:
+  # Seit dem Wechsel zu versitygw (2026-10) neu angelegt; das alte
+  # toniapply-heimserver_minio-data bleibt als Rueckweg liegen.
+  s3-data:
     external: true
-    name: toniapply-heimserver_minio-data
+    name: vorlesezeit-heimserver_s3-data
   backup-marker:
     external: true
     name: toniapply-heimserver_backup-marker

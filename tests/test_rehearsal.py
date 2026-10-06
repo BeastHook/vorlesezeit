@@ -1,6 +1,6 @@
 """Mehrkalender U13: Auswahl- und Verdrahtungslogik der Generalprobe.
 
-Kein echter Toniecloud-Aufruf, kein MinIO: die Fabrik bekommt einen
+Kein echter Toniecloud-Aufruf, kein S3-Speicher: die Fabrik bekommt einen
 MockTransport, `fill` einen Speicher-Ersatz.
 """
 

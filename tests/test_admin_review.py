@@ -1,5 +1,5 @@
 """U8: Admin-Reiter Aufnahmen -- Freigabe, Ablehnung, Ruecknahme, Zuschnitt,
-Kapitelname, Upload, Loeschen. Gegen echtes MinIO und echtes ffmpeg.
+Kapitelname, Upload, Loeschen. Gegen echten S3-Speicher und echtes ffmpeg.
 
 - Covers AE5, AE15, AE19 (Speicherseite), AE25, R11, R13-R15, R27, R28,
   R30, R40, R41, R42.

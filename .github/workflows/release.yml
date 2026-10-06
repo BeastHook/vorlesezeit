@@ -25,15 +25,15 @@ jobs:
           test "v$version" = "$GITHUB_REF_NAME"
       - name: ffmpeg
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-      - name: MinIO fuer die Speichertests (feste Entwicklungswerte wie docker-compose.yml)
+      - name: S3-Speicher fuer die Speichertests (feste Entwicklungswerte wie docker-compose.yml)
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=vorlesezeit -e MINIO_ROOT_PASSWORD=vorlesezeit-dev-secret \
-            quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
-          until curl -sf http://localhost:9000/minio/health/live; do sleep 1; done
-          docker run --rm --network host --entrypoint /bin/sh \
-            quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 \
-            -c "mc alias set local http://localhost:9000 vorlesezeit vorlesezeit-dev-secret && mc mb --ignore-existing local/vorlesezeit-test"
+          docker run -d --name s3 -p 9000:7070 \
+            -e ROOT_ACCESS_KEY=vorlesezeit -e ROOT_SECRET_KEY=vorlesezeit-dev-secret \
+            --entrypoint sh \
+            versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499 \
+            -c 'mkdir -p /data/vorlesezeit-test && exec versitygw --health /health posix /data'
+          for i in $(seq 60); do curl -sf http://localhost:9000/health && exit 0; sleep 1; done
+          docker logs s3; exit 1
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check app tests scripts

@@ -1,8 +1,8 @@
 """U1: Objektspeicher-Roundtrip gegen den bereitgestellten Speicher.
 
-Laeuft gegen echtes MinIO (kein Mock) -- vorher starten:
+Laeuft gegen echten S3-Speicher (versitygw) (kein Mock) -- vorher starten:
 
-    docker compose up -d minio createbuckets
+    docker compose up -d s3
 
 Endpunkt/Zugangsdaten entsprechen den Vorgaben in docker-compose.yml und
 lassen sich per Umgebungsvariable ueberschreiben.
@@ -51,7 +51,7 @@ def storage() -> ObjectStorage:
 
 
 def _key(name: str) -> str:
-    # Eindeutig: ein zweiter Testlauf kann gleichzeitig gegen dasselbe MinIO laufen.
+    # Eindeutig: ein zweiter Testlauf kann gleichzeitig gegen denselben Speicher laufen.
     return f"u13-proof/{uuid.uuid4().hex}-{name}"
 
 

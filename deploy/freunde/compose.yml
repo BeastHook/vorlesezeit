@@ -6,43 +6,36 @@
 name: vorlesezeit
 
 x-storage-env: &storage-env
-  STORAGE_ENDPOINT_URL: http://minio:9000
+  STORAGE_ENDPOINT_URL: http://s3:7070
   STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt}
   STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt}
   STORAGE_BUCKET: vorlesezeit
   STORAGE_REGION: us-east-1
 
 services:
-  minio:
-    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    command: server /data
+  s3:
+    image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
+    # Der Bucket ist ein Verzeichnis; mkdir legt ihn an, kein eigener Dienst
+    # mit Client noetig. $$: die Shell im Container setzt den Wert ein.
+    entrypoint: ["sh", "-c", "mkdir -p \"/data/$$STORAGE_BUCKET\" && exec versitygw --health /health posix /data"]
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt}
-      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt}
+      ROOT_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt}
+      ROOT_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt}
+      STORAGE_BUCKET: vorlesezeit
     volumes:
-      - minio-data:/data
-
-  createbuckets:
-    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
-    depends_on:
-      - minio
-    environment:
-      <<: *storage-env
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 \"$$STORAGE_ACCESS_KEY\" \"$$STORAGE_SECRET_KEY\" >/dev/null; do
-        echo 'warte auf minio...'; sleep 1;
-      done;
-      mc mb --ignore-existing \"local/$$STORAGE_BUCKET\";
-      "
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7070/health"]
+      interval: 10s
+      retries: 6
 
   app:
     image: ${VORLESEZEIT_IMAGE:?VORLESEZEIT_IMAGE fehlt}
     restart: unless-stopped
     depends_on:
-      createbuckets:
-        condition: service_completed_successfully
+      s3:
+        condition: service_healthy
     environment:
       <<: *storage-env
       APP_TIMEZONE: Europe/Berlin
@@ -104,5 +97,5 @@ services:
 
 volumes:
   db-data:
-  minio-data:
+  s3-data:
   backup-marker:

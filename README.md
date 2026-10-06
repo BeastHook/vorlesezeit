@@ -71,7 +71,7 @@ Reiter für alles Weitere.
 
 ## Selbst betreiben
 
-Vorlesezeit läuft als kleiner Docker-Compose-Stack: App, Objektspeicher (MinIO), Zeitplan
+Vorlesezeit läuft als kleiner Docker-Compose-Stack: App, Objektspeicher (versitygw), Zeitplan
 und Sicherung. Gedacht ist der Betrieb auf einem Heimserver hinter einem Cloudflare Tunnel,
 damit am Router kein Port freigegeben werden muss. Für das Mikrofon im Browser ist HTTPS
 Pflicht.
@@ -102,7 +102,7 @@ flowchart LR
     Handy["Browser<br/>(Familie, Admin)"] -->|HTTPS| Tunnel[Cloudflare Tunnel]
     Tunnel --> App["FastAPI-App"]
     App --> DB[(SQLite)]
-    App --> S3[(MinIO<br/>Aufnahmen)]
+    App --> S3[(versitygw<br/>Aufnahmen)]
     App -->|Mail| SMTP[SMTP]
     Zeitplan[Zeitplan<br/>alle 5 min] -->|/delivery/trigger| App
     App -->|Upload + Prüfung| TC[Toniecloud] --> Tonie((Creative Tonie))
@@ -114,10 +114,10 @@ Lokal starten (App auf <http://localhost:8000>):
 docker compose up --build
 ```
 
-Tests und Lint (die Tests brauchen den lokalen MinIO):
+Tests und Lint (die Tests brauchen den lokalen S3-Speicher):
 
 ```bash
-docker compose up -d minio createbuckets
+docker compose up -d s3
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest

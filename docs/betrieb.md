@@ -10,17 +10,17 @@ in `docker-compose.heimserver.yml`.
 | Dienst | Aufgabe |
 |---|---|
 | `app` | Vorlesezeit, nur im internen Compose-Netz, Gesundheitsprüfung gegen `/status` |
-| `minio` | Objektspeicher für die Aufnahmen, nur intern |
-| `createbuckets` | legt beim Start einmal den Bucket an und endet |
+| `s3` | Objektspeicher für die Aufnahmen (versitygw), nur intern; legt den Bucket beim Start als Verzeichnis an |
 | `cloudflared` | Cloudflare Tunnel, der einzige Weg von außen zur App |
 | `scheduler` | ruft alle 5 Minuten zwischen 17:00 und 01:45 (Europe/Berlin) `/delivery/trigger` auf, entscheidet selbst nichts |
 | `backup` | sichert jede Nacht um 00:30 Datenbank und Aufnahmen auf das zweite Medium; verpasst es den Lauf (Ruhezustand, Neustart), holt es ihn nach dem Aufwachen nach |
 
 Kein Dienst veröffentlicht einen Port, am Router wird nichts freigegeben.
 Das Compose-Projekt heißt `vorlesezeit-heimserver`. Datenbank, Speicher und
-Sicherungsmarke liegen in externen Volumes, die aus der Zeit vor der
-Umbenennung weiter `toniapply-heimserver_db-data`, `…_minio-data` und
-`…_backup-marker` heißen; auch die Datenbankdatei heißt weiter
+Sicherungsmarke liegen in externen Volumes: Datenbank und Marke heißen aus der
+Zeit vor der Umbenennung weiter `toniapply-heimserver_db-data` und
+`…_backup-marker`, die Aufnahmen liegen seit dem Wechsel zu versitygw in
+`vorlesezeit-heimserver_s3-data`; auch die Datenbankdatei heißt weiter
 `/data/toniapply.db`. Die Demo-Daten des Entwicklungsaufbaus (Projekt
 `vorlesezeit`) gehen dadurch nicht mit.
 
@@ -152,7 +152,7 @@ bricht `docker compose` mit einer Meldung wie
 |---|---|---|
 | `SESSION_SECRET_KEY` | ja | langer Zufallswert, z. B. `openssl rand -hex 32` |
 | `TRIGGER_SECRET` | ja | langer Zufallswert, auch für cron-job.org |
-| `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` | ja | eigener MinIO-Benutzer und langes Passwort |
+| `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` | ja | Zugang zum Objektspeicher (beliebiger Name) und langes Passwort |
 | `STORAGE_BUCKET` | ja | Bucketname, z. B. `vorlesezeit` |
 | `ADMIN_EMAIL` | ja | Admin-Adresse |
 | `CREDENTIALS_KEY` | dringend empfohlen | Schlüssel für die Passwörter in der Datenbank, siehe „Schlüssel für die Zugangsdaten“ |
@@ -279,7 +279,16 @@ Rückweg ist die Sicherung von vor der Umstellung.
 
 **Auf einem neuen Gerät** vor dem ersten Start die drei externen Volumes
 anlegen (compose tut das nicht):
-`for v in db-data minio-data backup-marker; do docker volume create toniapply-heimserver_$v; done`
+`for v in db-data backup-marker; do docker volume create toniapply-heimserver_$v; done; docker volume create vorlesezeit-heimserver_s3-data`
+
+**Umstellung MinIO → versitygw** (einmalig, Oktober 2026): die MinIO-Images
+sind nicht mehr öffentlich ladbar. Die Aufnahmen werden einmal vom alten
+MinIO-Volume `toniapply-heimserver_minio-data` in das neue
+`vorlesezeit-heimserver_s3-data` kopiert (Sicherung vorher, App gestoppt,
+Anzahl und Prüfsummen verglichen). Das alte Volume und das MinIO-Image
+bleiben als Rückweg liegen: alte `docker-compose.heimserver.yml` aus git, dann
+`$DC up -d`. **Kein** `docker image prune`, solange dieser Rückweg gebraucht
+wird.
 
 **Niemals `down -v`** auf dem Heimserver: das löscht Datenbank und Aufnahmen.
 Alle Dienste haben `restart: unless-stopped` und kommen nach einem Neustart
@@ -336,9 +345,9 @@ Sicherung sofort auslösen:
    starten. Das Sicherungsziel bleibt eingebunden. Die Volumes sind extern:
    `$DC down -v` entfernt sie nicht, und compose legt sie nicht selbst an.
    Danach leer neu anlegen:
-   `for v in db-data minio-data backup-marker; do docker volume rm toniapply-heimserver_$v; docker volume create toniapply-heimserver_$v; done`
+   `for v in toniapply-heimserver_db-data toniapply-heimserver_backup-marker vorlesezeit-heimserver_s3-data; do docker volume rm $v; docker volume create $v; done`
    (auf einem frischen Gerät nur `docker volume create`).
-2. `$DC up -d minio createbuckets`
+2. `$DC up -d s3`
 3. `ls <Ziel>/db/` und den gewünschten Stand wählen, dann
    `$DC run --rm --no-deps backup python deploy/backup/backup.py restore vorlesezeit-<UTC-Zeit>.db`
 4. `$DC up -d` und prüfen: Kalender sichtbar, eine Aufnahme spielt ab,

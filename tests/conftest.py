@@ -21,11 +21,11 @@ from app.models import Person
 REQUIRED_ENV = {
     "APP_TIMEZONE": "Europe/Berlin",
     "STORAGE_ENDPOINT_URL": "http://localhost:9000",
-    # Feste lokale MinIO-Entwicklungszugangsdaten aus docker-compose.yml --
+    # Feste lokale Speicher-Entwicklungszugangsdaten aus docker-compose.yml --
     # keine echten Geheimnisse, dieselben Literale wie in test_storage.py.
     # Bis U7 gab es keinen Test, der ueber die volle App wirklich schreibt
     # (put/get); die vorherigen Platzhalterwerte waren nie gegen echtes
-    # MinIO gelaufen.
+    # S3-Speicher gelaufen.
     "STORAGE_ACCESS_KEY": "vorlesezeit",
     "STORAGE_SECRET_KEY": "vorlesezeit-dev-secret",
     "STORAGE_BUCKET": "vorlesezeit-test",

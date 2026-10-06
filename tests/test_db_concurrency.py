@@ -2,7 +2,7 @@
 
 Charakterisierung zuerst: eine Einreichung und ein Auslieferungslauf
 speichern gleichzeitig -- ueber die echten Codepfade (Aufnahme-Route mit
-echtem ffmpeg + MinIO, Ausloese-Route mit echtem Hintergrund-Thread und
+echtem ffmpeg + S3-Speicher, Ausloese-Route mit echtem Hintergrund-Thread und
 eigener Sitzung), gegen die temporaere Datei-Datenbank aus conftest.py. Nur
 die Toniecloud ist ein Fake, und der haelt absichtlich an.
 

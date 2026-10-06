@@ -126,7 +126,7 @@ def mirror_bucket() -> None:
         copied += 1
 
     # Ein leerer Bucket bei gefüllter Spiegelung ist eher ein Fehler (falscher
-    # Bucket, frisch aufgesetztes MinIO) als 'alles gelöscht' -- dann nicht die
+    # Bucket, frisch aufgesetzter Speicher) als 'alles gelöscht' -- dann nicht die
     # einzige Sicherung der Aufnahmen wegräumen, sondern ohne Zeitmarke abbrechen.
     if not remote and any(p.is_file() for p in root.rglob("*")):
         raise RuntimeError(

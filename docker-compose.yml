@@ -1,34 +1,28 @@
-# Lokaler Beweis fuer U1: App + S3-kompatibler Objektspeicher (MinIO).
+# Lokaler Beweis fuer U1: App + S3-kompatibler Objektspeicher (versitygw).
 # Ersetzt keinen echten Zielort -- siehe U1-Plan, Abschnitt "Zielort".
 name: vorlesezeit
 services:
-  minio:
-    image: quay.io/minio/minio:latest
-    command: server /data --console-address ":9001"
-    # KTD17: der Browser braucht den Speicher nicht mehr (Audio laeuft durch
-    # die App). Nur noch auf der Loopback-Schnittstelle, fuer die Tests
-    # (tests/test_storage.py) und die Konsole vom Entwicklerrechner aus.
+  s3:
+    # versitygw statt MinIO (MinIO-Images sind seit 2026-10 nicht mehr
+    # oeffentlich ladbar). Legt die Aufnahmen als normale Dateien unter
+    # /data/<bucket> ab; der Bucket ist ein Verzeichnis, mkdir legt ihn an.
+    image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
+    entrypoint: ["sh", "-c", "mkdir -p \"/data/$$STORAGE_BUCKET\" && exec versitygw --health /health posix /data"]
+    # KTD17: der Browser braucht den Speicher nicht (Audio laeuft durch die
+    # App). Nur auf der Loopback-Schnittstelle, fuer die Tests
+    # (tests/test_storage.py) vom Entwicklerrechner aus.
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:9000:7070"
     environment:
-      MINIO_ROOT_USER: vorlesezeit
-      MINIO_ROOT_PASSWORD: vorlesezeit-dev-secret
+      ROOT_ACCESS_KEY: vorlesezeit
+      ROOT_SECRET_KEY: vorlesezeit-dev-secret
+      STORAGE_BUCKET: vorlesezeit-test
     volumes:
-      - minio-data:/data
-
-  createbuckets:
-    image: quay.io/minio/mc:latest
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 vorlesezeit vorlesezeit-dev-secret; do
-        echo 'warte auf minio...'; sleep 1;
-      done;
-      mc mb --ignore-existing local/vorlesezeit-test;
-      exit 0;
-      "
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7070/health"]
+      interval: 5s
+      retries: 12
 
   app:
     build: .
@@ -36,7 +30,7 @@ services:
       - "8000:8000"
     environment:
       APP_TIMEZONE: Europe/Berlin
-      STORAGE_ENDPOINT_URL: http://minio:9000
+      STORAGE_ENDPOINT_URL: http://s3:7070
       STORAGE_ACCESS_KEY: vorlesezeit
       STORAGE_SECRET_KEY: vorlesezeit-dev-secret
       STORAGE_BUCKET: vorlesezeit-test
@@ -63,8 +57,9 @@ services:
     volumes:
       - db-data:/data
     depends_on:
-      - minio
+      s3:
+        condition: service_healthy
 
 volumes:
-  minio-data:
+  s3-data:
   db-data:

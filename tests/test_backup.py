@@ -2,9 +2,9 @@
 
 Das Skript liest seine Konfiguration beim Import aus Umgebungsvariablen; jeder
 Test lädt es deshalb frisch mit eigenem Ziel, eigener Datenbank und einem
-eigenen Bucket. Läuft gegen echtes MinIO (kein Mock) -- vorher starten:
+eigenen Bucket. Läuft gegen echten S3-Speicher (kein Mock) -- vorher starten:
 
-    docker compose up -d minio createbuckets
+    docker compose up -d s3
 """
 
 from __future__ import annotations

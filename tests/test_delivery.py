@@ -38,7 +38,7 @@ STOCK = [
 
 class FakeStorage:
     """Duck-typed Ersatz fuer ObjectStorage -- run_delivery braucht nur
-    `.get(key) -> bytes`. Kein MinIO noetig, um Auslieferungslogik zu
+    `.get(key) -> bytes`. Kein S3-Speicher noetig, um Auslieferungslogik zu
     testen (das deckt tests/test_storage.py bereits separat ab)."""
 
     def __init__(self, files: dict[str, bytes]) -> None:

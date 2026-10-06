@@ -1,7 +1,7 @@
 """Objektspeicher-Zugriff: ablegen, lesen (auch als Byte-Bereich), loeschen.
 
 Faehrt gegen ein S3-kompatibles API (KTD11 verlangt Objektspeicher, kein
-lokales Dateisystem). Der Endpunkt entscheidet, ob das MinIO (lokaler Beweis)
+lokales Dateisystem). Der Endpunkt entscheidet, ob das versitygw (lokaler Beweis)
 oder ein echter Anbieter ist -- der Code hier kennt den Unterschied nicht.
 
 Der Speicher ist nur fuer die App erreichbar (KTD17): Audio liefert

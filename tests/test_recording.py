@@ -1,4 +1,4 @@
-"""U7: Aufnahme-Endpunkte gegen echtes ffmpeg + echtes MinIO (kein Mock --
+"""U7: Aufnahme-Endpunkte gegen echtes ffmpeg + echten S3-Speicher (kein Mock --
 Plan-Execution-note: nur der Aufnahmeweg selbst ist nicht sinnvoll
 unit-testbar; Route/Speicher/Normalisierung im Zusammenspiel schon).
 
@@ -284,7 +284,7 @@ def test_submit_storage_failure_returns_422(
     auftrag = _make_auftrag(db_session, person, day=3)
 
     def failing_put(*args, **kwargs):
-        raise RuntimeError("MinIO ist gerade nicht erreichbar")
+        raise RuntimeError("Speicher ist gerade nicht erreichbar")
 
     monkeypatch.setattr(person_client.app.state.storage, "put", failing_put)
 

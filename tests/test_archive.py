@@ -1,5 +1,5 @@
 """U9: Familienarchiv -- tagweise Sichtbarkeit, serverseitig gefiltert.
-Gegen echtes MinIO (Audio ueber die App mit Bereichsanfragen, Loeschen
+Gegen echten S3-Speicher (Audio ueber die App mit Bereichsanfragen, Loeschen
 nach R10).
 
 - Covers AE8, AE11, R22, R23, R28, R34, R37, R40 (Archivseite).
