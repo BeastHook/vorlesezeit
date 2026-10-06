@@ -1,0 +1,66 @@
+# One-Klick-Setup Baustein 1: bei jedem Tag vX.Y.Z erst Tests, dann das
+# Multi-Arch-Image auf ghcr.io. Nie "latest": Freunde-Instanzen nennen feste
+# Versionen (Spec 2026-10-04).
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Tag gleich Version in pyproject.toml
+        run: |
+          version=$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          test "v$version" = "$GITHUB_REF_NAME"
+      - name: ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: MinIO fuer die Speichertests (feste Entwicklungswerte wie docker-compose.yml)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=vorlesezeit -e MINIO_ROOT_PASSWORD=vorlesezeit-dev-secret \
+            quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
+          until curl -sf http://localhost:9000/minio/health/live; do sleep 1; done
+          docker run --rm --network host --entrypoint /bin/sh \
+            quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 \
+            -c "mc alias set local http://localhost:9000 vorlesezeit vorlesezeit-dev-secret && mc mb --ignore-existing local/vorlesezeit-test"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check app tests scripts
+      - run: pytest -q
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/vorlesezeit
+          tags: type=semver,pattern={{version}}
+          flavor: latest=false
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

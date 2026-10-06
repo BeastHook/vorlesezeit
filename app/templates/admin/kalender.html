@@ -1,0 +1,63 @@
+{% extends "admin/_base.html" %}
+{% from "_advent.html" import tuerchen, siegel %}
+{% block title %}Kalender{% endblock %}
+{% block content %}
+{% include "admin/_scope.html" %}
+<div class="panel-grid">
+  <div class="panel">
+    <div class="panel-kicker">Nächste Auslieferung · täglich {{ delivery_time.strftime("%H:%M") }}</div>
+    {% if next_tile %}
+    {% set next_zustand = "zu" if next_tile.state.key in ("frei", "offen") else "spalt" %}
+    <div class="panel-title-row"><span class="glimmt">{{ tuerchen(next_zustand, number=next_tile.slot.day, flicker=False) }}</span><div class="panel-title">Türchen {{ next_tile.slot.day }} · {{ next_tile.title or "(ohne Titel)" }}</div></div>
+    <p>{{ next_tile.state.label[:1]|upper }}{{ next_tile.state.label[1:] }}{% if next_person %}, gesprochen von {{ next_person }}{% endif %}.</p>
+    <span class="tag{% if next_tile.state.key == 'freigegeben' %} tag-accent-2{% elif next_tile.state.missing %} tag-warn{% endif %}">{{ next_tile.state.label }}</span>
+    {% else %}
+    <div class="panel-title">Gerade ist kein Advent</div>
+    <p>Die erste Auslieferung läuft am Vorabend des 1. Dezember um {{ delivery_time.strftime("%H:%M") }}.</p>
+    {% endif %}
+  </div>
+  <div class="panel">
+    <div class="panel-kicker">Creative Tonie</div>
+    {% if tonie %}
+    <div class="panel-title">{{ tonie_name }}</div>
+    {% if tonie.verified_for_day %}
+    <p>Zuletzt verifiziert: Türchen {{ tonie.verified_for_day }}.</p>
+    <span class="tag tag-strong">ausgeliefert &amp; verifiziert</span>
+    {% else %}
+    <p>Noch kein Türchen ausgeliefert und verifiziert.</p>
+    {% endif %}
+    {% else %}
+    <div class="panel-title">Kein Tonie</div>
+    <p>Diesen Kalender bespielt noch kein Tonie. Ordne ihn im Setup zu.</p>
+    <a class="btn btn-secondary btn-inline" href="/admin/setup">Zum Setup</a>
+    {% endif %}
+  </div>
+  <div class="panel{% if missing_count %} warm{% endif %}">
+    <div class="panel-kicker">Was fehlt</div>
+    {% if missing_count %}
+    <div class="panel-title">{{ missing_count }} Türchen ohne freigegebenen Beitrag</div>
+    {% if missing_notes %}<p>{{ missing_notes|join(" ") }}</p>{% endif %}
+    {% else %}
+    <div class="panel-title">Nichts offen</div>
+    <p>Jedes anstehende Türchen hat einen freigegebenen Beitrag.</p>
+    {% endif %}
+    <a class="btn btn-secondary btn-inline" href="/admin/personen">Zu den Personen</a>
+  </div>
+</div>
+<h3>Adventskalender 2026</h3>
+<div class="cal">
+  {% for tile in tiles %}
+  {% set zustand = "zu" if tile.state.key in ("frei", "offen") else "spalt" %}
+  <a data-day="{{ tile.slot.day }}" class="st-{{ tile.state.key }}{% if tile.soon %} st-missing{% endif %}" href="{{ tile.href }}"><span class="d">{{ tuerchen(zustand, number=tile.slot.day, flicker=False) }}
+  {%- if tile.state.key == "ausgeliefert" and tile.state.beitrag and tile.state.beitrag.person %}{{ siegel(tile.state.beitrag.person.display_name, tile.state.beitrag.id|siegel_kontur, 36) }}{% endif %}</span><span class="t">{{ tile.title or "(ohne Titel)" }}</span>{% if tile.chapter_open %}<span class="l"><strong>Kapitelname offen</strong></span>{% endif %}<span class="l">{{ tile.line }}</span></a>
+  {% endfor %}
+</div>
+{# Legende als Muster-Kacheln (Nutzerentscheidung 2026-10-04, docs/design/legende-name-mockup.html). #}
+<div class="legende-muster" aria-label="Legende">
+  <figure><div class="muster">{{ tuerchen("zu", number=7, flicker=False, announce=False) }}</div><figcaption><b>zu</b>noch offen</figcaption></figure>
+  <figure><div class="muster">{{ tuerchen("spalt", number=8, flicker=False, announce=False) }}</div><figcaption><b>Spalt + Licht</b>eingereicht oder freigegeben</figcaption></figure>
+  <figure><div class="muster">{{ tuerchen("spalt", number=3, flicker=False, announce=False) }}<svg class="siegel" viewBox="0 0 100 100" aria-hidden="true"><use href="#wachs-2" class="wachs"/><circle class="praegung" cx="50" cy="51" r="23"/><circle class="ring" cx="50" cy="51" r="19"/></svg></div><figcaption><b>Siegel</b>ausgeliefert</figcaption></figure>
+  <figure><div class="muster fehlt">{{ tuerchen("zu", number=9, flicker=False, announce=False) }}</div><figcaption><b class="legend-warn">roter Rand</b>fehlt (nächste 3 Tage)</figcaption></figure>
+  <figure><div class="muster glimmt">{{ tuerchen("spalt", number=5, flicker=False, announce=False) }}</div><figcaption><b>Glimmen</b>nächster Liefertag</figcaption></figure>
+</div>
+{% endblock %}

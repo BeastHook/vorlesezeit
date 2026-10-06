@@ -1,0 +1,10 @@
+{% extends "admin/_base.html" %}
+{% block title %}Ohne Kalender{% endblock %}
+{% block content %}
+<div class="panel muted panel-narrow">
+  <div class="panel-kicker">Kalender</div>
+  <div class="panel-title">{{ tonie_name }} gehört zu keinem Kalender</div>
+  <p>Er bekommt keinen täglichen Lauf. Unter „Auslieferung“ kannst du ihn mit dem manuellen Lauf bespielen. Einen Kalender ordnest du im Setup zu.</p>
+  <div class="btn-row-left"><a class="btn btn-secondary btn-inline" href="/admin/auslieferung">Zur Auslieferung</a><a class="btn btn-ghost" href="/admin/setup">Zum Setup</a></div>
+</div>
+{% endblock %}

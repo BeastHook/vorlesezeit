@@ -1,0 +1,27 @@
+{% extends "admin/_base.html" %}
+{% set name = person.display_name or person.email %}
+{% block title %}Person löschen{% endblock %}
+{% block content %}
+<div class="panel warm panel-narrow">
+  <div class="panel-kicker">{{ name }} löschen?</div>
+  {% if blocked %}
+  <div class="lock-note"><strong>{{ name }} hat schon Aufnahmen eingereicht und kann deshalb nicht gelöscht werden.</strong></div>
+  <p class="meta">Soll {{ name }} nicht mehr hinein, widerrufe den Zugang. Die Aufnahmen bleiben dann erhalten.</p>
+  <div class="btn-row-left">
+    <a class="btn btn-danger" href="/admin/personen/{{ person.id }}/widerrufen">Zugang widerrufen</a>
+    <a class="btn btn-ghost" href="/admin/personen">Zurück</a>
+  </div>
+  {% else %}
+  <p class="meta">{{ person.email }}</p>
+  <p>Die Person verschwindet aus der Liste. Ihr Einladungslink und laufende Sitzungen funktionieren danach nicht mehr.</p>
+  {% if stories %}
+  <p>Wieder frei werden: {{ stories | join(", ") }}.</p>
+  <p class="meta">Die Geschichten selbst bleiben erhalten, du kannst sie unter „Geschichten“ neu vergeben.</p>
+  {% endif %}
+  <form method="post" action="/admin/personen/{{ person.id }}/loeschen" class="btn-row-left">
+    <button type="submit" class="btn btn-danger">Person löschen</button>
+    <a class="btn btn-ghost" href="/admin/personen">Abbrechen</a>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

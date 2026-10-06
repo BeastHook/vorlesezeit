@@ -1,0 +1,56 @@
+{% extends "admin/_base.html" %}
+{% block title %}Personen{% endblock %}
+{% block content %}
+{% if invite_from %}
+<div class="panel warm" style="margin-bottom:var(--space-4)">
+  <div class="panel-kicker">Einladungstermin erreicht ({{ invite_from.day }}. {{ ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][invite_from.month - 1] }})</div>
+  {% if uninvited %}<p><strong>Noch ohne Einladung:</strong> {{ uninvited }}.</p>
+  <p class="meta">Die App verschickt nichts von selbst. Schick die Einladung unten bei der jeweiligen Person.</p>
+  {% else %}<p>Alle Personen mit Auftrag haben eine Einladung bekommen.</p>{% endif %}
+</div>
+{% endif %}
+<h3>Verwandte</h3>
+<div class="person-list">
+  {% for row in rows %}
+  <div class="person-row">
+    <div class="who"><strong>{{ row.name }}</strong><div class="meta">{{ row.person.email }}</div>
+      <div class="meta">{% for part in row.status %}<span class="person-status-part">{{ part }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+      {% if row.chips or row.drafts %}<div class="cal-chips" style="margin-top:4px">{% for label, done in row.chips %}<span class="cal-chip{% if done %} done{% endif %}">{{ label }}</span>{% endfor %}{% for title in row.drafts %}<span class="cal-chip">Entwurf: {{ title }}</span>{% endfor %}</div>{% endif %}</div>
+    {% if row.uninvited %}<span class="tag tag-warn">keine Einladung</span>
+    {% elif not row.days %}<span class="tag tag-neutral">{{ "nur Entwurf" if row.drafts else "kein Türchen" }}</span>
+    {% elif not row.open_days %}<span class="tag tag-accent-2">alles abgegeben</span>
+    {% elif overdue %}<span class="tag tag-warn">{{ row.open_days | length }} offen · überfällig</span>
+    {% else %}<span class="tag">{{ row.open_days | length }} offen</span>{% endif %}
+    <div class="acts">
+      {% if row.days %}<form method="post" action="/admin/personen/{{ row.person.id }}/erinnern">
+        <button type="submit" class="btn btn-secondary" data-busy="Wird verschickt …" data-done="Verschickt ✓"{% if not row.open_days %} disabled title="Keine offenen Türchen"{% endif %}>Erinnern</button>
+      </form>{% endif %}
+      <form method="post" action="/admin/personen/{{ row.person.id }}/einladen">
+        <button type="submit" class="btn {% if row.uninvited %}btn-primary btn-inline{% else %}btn-ghost{% endif %}" data-busy="Wird verschickt …" data-done="Verschickt ✓">Einladung schicken</button>
+      </form>
+      <a class="btn btn-danger" href="/admin/personen/{{ row.person.id }}/widerrufen">Zugang widerrufen</a>
+      <a class="btn btn-ghost" href="/admin/personen/{{ row.person.id }}/loeschen">Löschen …</a>
+    </div>
+  </div>
+  {% else %}
+  <p class="meta">Noch keine Verwandten angelegt.</p>
+  {% endfor %}
+</div>
+
+<form class="panel" method="post" action="/admin/persons" style="margin-top:var(--space-4)">
+  <div class="panel-kicker">Person hinzufügen</div>
+  <div class="row-fields">
+    <div class="field"><label for="p-name">Name</label><input id="p-name" class="input" name="display_name"></div>
+    <div class="field"><label for="p-mail">Mailadresse</label><input id="p-mail" class="input" type="email" name="email" required></div>
+  </div>
+  <button type="submit" class="btn btn-secondary btn-inline">Anlegen</button>
+</form>
+
+{% if free_count %}
+<div class="panel" style="margin-top:var(--space-4)">
+  <div class="panel-kicker">Eingang ohne Türchen</div>
+  <p>{{ free_count }} freie {{ "Einreichung" if free_count == 1 else "Einreichungen" }} ohne Türchen-Bezug.</p>
+  <a class="btn btn-secondary btn-inline" href="/admin/aufnahmen">Zu den Aufnahmen</a>
+</div>
+{% endif %}
+{% endblock %}

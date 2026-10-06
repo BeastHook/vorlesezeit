@@ -1,0 +1,187 @@
+{% extends "admin/_base.html" %}
+{% block title %}Setup{% endblock %}
+{% macro herkunft(h) %}
+{% if h.umgebung %}<span class="meta">aus der Umgebung übernommen</span>{% endif %}
+{% for name in h.abweichend %}<span class="tag tag-outline">{% if name == "Passwort" %}Passwort weicht ab{% else %}Umgebung weicht ab: {{ name }}{% endif %}</span>{% endfor %}
+{% endmacro %}
+{% macro calendar_select(tonie, label, disabled=False) %}
+<select class="input" name="kalender_{{ tonie.id }}" aria-label="Kalender für {{ label }}"{% if disabled %} disabled{% endif %}>
+  {% for c in calendars %}<option value="{{ c.id }}"{% if tonie.campaign_id == c.id %} selected{% endif %}>{{ c.name }}</option>{% endfor %}
+  <option value=""{% if tonie.campaign_id is none %} selected{% endif %}>ohne Kalender</option>
+</select>
+{% endmacro %}
+{% block content %}
+{% if neu_eingeben %}
+<div class="flash err" role="alert">{% if neu_eingeben|length == 1 %}Ein gespeichertes Passwort lässt{% else %}{{ neu_eingeben|length }} gespeicherte Passwörter lassen{% endif %} sich nicht entschlüsseln. Bitte unten neu eingeben. Bis dahin meldet sich die App mit diesen Zugangsdaten nirgends an.</div>
+{% endif %}
+<nav class="setup-nav" aria-label="Abschnitte">
+  <a href="#s-kal">Kalender</a><a href="#s-konten">tonies-Konten</a><a href="#s-smtp">Mailversand</a><a href="#s-termine">Termine</a><a href="#s-name">Namen</a>
+</nav>
+
+<section class="setup-section" id="s-kal">
+  <h3>Kalender</h3>
+  <p class="meta">Jeder Kalender hat 24 Tage, einen eigenen Ersatzbeitrag und einen eigenen Verlauf. Löschen geht erst, wenn kein Tonie mehr dazugehört.</p>
+  <div class="panel-grid">
+    {% for k in kalender %}
+    <form class="panel{% if not k.tonies %} muted{% endif %}" method="post" action="/admin/setup/kalender/{{ k.calendar.id }}">
+      <div class="field"><label for="k{{ k.calendar.id }}">Name</label><input class="input" id="k{{ k.calendar.id }}" name="name" value="{{ k.calendar.name or '' }}" required></div>
+      <div class="cal-chips">
+        {% for t in k.tonies %}<span class="cal-chip">{{ t.name or short_id(t.tonie_id) }}</span>{% else %}<span class="tag tag-outline">kein Tonie</span>{% endfor %}
+      </div>
+      {% if k.tonies %}
+      <p class="meta">{{ k.vergeben }} Aufträge vergeben, {{ 24 - k.vergeben }} Tage frei.</p>
+      {% else %}
+      <p class="meta">Ohne Tonie läuft nichts und es kommt keine Meldung. Ordne unten bei einem Konto einen Tonie zu.</p>
+      {% endif %}
+      <div class="btn-row-left">
+        <button type="submit" class="btn btn-secondary btn-inline">Umbenennen</button>
+        <a class="btn btn-ghost" href="/admin/setup/kalender/{{ k.calendar.id }}/loeschen">Löschen …</a>
+      </div>
+    </form>
+    {% endfor %}
+    <form class="panel" method="post" action="/admin/setup/kalender">
+      <div class="panel-kicker">Neuer Kalender</div>
+      <div class="field"><label for="k-neu">Name</label><input class="input" id="k-neu" name="name" placeholder="z. B. Familie Berger" required></div>
+      <button type="submit" class="btn btn-secondary btn-inline">Anlegen</button>
+    </form>
+  </div>
+</section>
+
+<section class="setup-section" id="s-konten"{% if konten|selectattr("busy")|first %} data-live-setup="/admin/setup/status"{% endif %}>
+  <h3>tonies-Konten</h3>
+  <p class="meta">Jeder Tonie gehört höchstens einem Kalender. Ein Tonie ohne Kalender bekommt keinen täglichen Lauf und ist nur Ziel des manuellen Laufs.</p>
+  <div class="panel-grid">
+    {% for p in konten %}
+    {% set k = p.konto %}
+    {% set locked = p.busy|length > 0 %}
+    <div class="panel">
+      <div class="panel-kicker">{% if p.geprueft %}Konto geprüft{% else %}Konto{% endif %}</div>
+      <div class="panel-title">{{ k.label or mask_email(k.username) }}</div>
+      <div class="field-state">
+        {% if k.needs_reentry %}<span class="tag tag-warn">Passwort neu eingeben</span>
+        {% elif p.geprueft %}<span class="tag tag-accent-2">Anmeldung gelungen</span>
+        {% elif k.checked_at is none or p.hinweise.ungeprueft %}<span class="tag tag-alert">ungeprüft</span>
+        {% else %}<span class="tag tag-accent-2">geprüft</span><span class="meta">Anmeldung zuletzt gelungen am {{ when(k.checked_at) }}</span>{% endif %}
+        {{ herkunft(p.hinweise) }}
+      </div>
+      {% if p.fehler %}
+      <div class="check-note" role="alert" data-result="err"><p><strong>Prüfung fehlgeschlagen.</strong> {{ p.fehler }}</p></div>
+      {% endif %}
+      {% if locked %}
+      <div class="lock-note"><strong>{{ p.busy|join(", ") }} wird gerade bespielt.</strong> Zugangsdaten und Zuordnung sind gesperrt, bis der Lauf endet. Lade die Seite danach neu.</div>
+      {% endif %}
+      <form method="post" action="/admin/setup/konten/{{ k.id }}/zuordnung" class="stack-form">
+        {% if p.tonies %}
+        {% if p.geprueft %}<p>Auf diesem Konto {% if p.tonies|length == 1 %}gibt es einen Creative Tonie{% else %}gibt es {{ p.tonies|length }} Creative Tonies{% endif %}. Wähle für jeden einen Kalender.</p>{% endif %}
+        <ul class="tonie-list">
+          {% for z in p.tonies %}
+          {% set label = z.tonie.name or short_id(z.tonie.tonie_id) %}
+          <li class="tonie-item{% if z.busy %} locked{% endif %}"{% if z.busy %} data-busy-tonie="{{ z.tonie.id }}"{% endif %}>
+            <div class="grow"><div class="name">{{ label }}</div>
+              <div class="meta">{% if z.busy %}Lauf läuft{% else %}ID {{ short_id(z.tonie.tonie_id) }}{% if z.tonie.campaign_id is none %} · nur manueller Lauf{% endif %}{% if z.tonie.abraeumen_offen %} · Kapitel wird am 25.12. abgeräumt{% endif %}{% endif %}</div>
+              {% if z.anderes_konto %}
+              <label class="check-line"><input type="checkbox" name="wechsel" value="{{ z.tonie.id }}"{% if z.busy %} disabled{% endif %}> über dieses Konto bespielen <span class="meta">(bisher {{ z.anderes_konto.label or mask_email(z.anderes_konto.username) }})</span></label>
+              {% endif %}
+            </div>
+            {{ calendar_select(z.tonie, label, z.busy) }}
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="meta">Wechselt ein Tonie den Kalender oder wird er getrennt, nimmt die App ihr Kapitel sofort von ihm herunter. Alles andere auf dem Tonie bleibt.</p>
+        <button type="submit" class="btn btn-secondary btn-inline">Zuordnung speichern</button>
+        {% else %}
+        <p class="meta">Auf diesem Konto ist noch kein Creative Tonie bekannt.</p>
+        {% endif %}
+      </form>
+      <details class="setup-details"{% if k.needs_reentry or p.fehler %} open{% endif %}>
+        <summary class="btn btn-ghost">Zugangsdaten ändern</summary>
+        <form method="post" action="/admin/setup/konten/{{ k.id }}/pruefen" data-busy="Anmeldung wird geprüft …" data-done="Geprüft ✓" data-busy-note="Das dauert bis zu einer halben Minute. Bitte die Seite offen lassen.">
+          <div class="field"><label for="ku{{ k.id }}">E-Mail des tonies-Kontos</label><input class="input" id="ku{{ k.id }}" name="username" type="email" value="{{ k.username }}" autocomplete="off"{% if locked %} disabled{% endif %}></div>
+          <div class="field"><label for="kp{{ k.id }}">Passwort</label><input class="input{% if k.needs_reentry or p.fehler %} is-err{% endif %}" id="kp{{ k.id }}" name="password" type="password" autocomplete="new-password"{% if not k.needs_reentry %} placeholder="leer lassen, dann bleibt es"{% endif %}{% if locked %} disabled{% endif %}>
+            {% if k.password and not k.needs_reentry %}<div class="field-state"><span class="tag tag-neutral">gesetzt</span></div>{% endif %}</div>
+          <button type="submit" class="btn btn-primary btn-inline"{% if locked %} disabled{% endif %}>{% if p.fehler %}Erneut prüfen{% else %}Anmeldung prüfen{% endif %}</button>
+        </form>
+        {% if not locked %}<a class="btn btn-ghost" href="/admin/setup/konten/{{ k.id }}/loeschen">Konto löschen …</a>{% endif %}
+      </details>
+      {% if not k.needs_reentry %}
+      <form method="post" action="/admin/setup/konten/{{ k.id }}/pruefen" data-busy="Tonies werden eingelesen …" data-done="Eingelesen ✓">
+        <button type="submit" class="btn btn-ghost"{% if locked %} disabled{% endif %}>Tonies neu einlesen</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <form class="panel" method="post" action="/admin/setup/konten" data-busy="Anmeldung wird geprüft …" data-done="Geprüft ✓" data-busy-note="Das dauert bis zu einer halben Minute. Bitte die Seite offen lassen.">
+      <div class="panel-kicker">Neues Konto</div>
+      {% if fehler.konto_neu %}<div class="check-note" role="alert" data-result="err"><p><strong>Anmeldung nicht übernommen.</strong> {{ fehler.konto_neu }}</p></div>{% endif %}
+      <div class="field"><label for="nk1">E-Mail des tonies-Kontos</label><input class="input" id="nk1" name="username" type="email" placeholder="name@beispiel.de" autocomplete="off" value="{{ eingaben.konto_neu.username if eingaben.konto_neu else '' }}" required></div>
+      <div class="field"><label for="nk2">Passwort</label><input class="input{% if fehler.konto_neu %} is-err{% endif %}" id="nk2" name="password" type="password" autocomplete="new-password" required></div>
+      <p class="meta">Die App meldet sich zur Probe an und zeigt dir danach die Creative Tonies des Kontos zur Auswahl.</p>
+      <button type="submit" class="btn btn-primary btn-inline">Anmeldung prüfen</button>
+    </form>
+  </div>
+</section>
+
+<section class="setup-section" id="s-smtp">
+  <h3>Mailversand</h3>
+  <p class="meta">Über diesen Zugang gehen Einladungen, Erinnerungen, Ablehnungen und die Abendmeldung hinaus.</p>
+  <form class="panel" method="post" action="/admin/setup/smtp" data-busy="Testmail wird verschickt …" data-done="Verschickt ✓" data-busy-note="Die Testmail geht an {{ admin_email }}.">
+    <div class="field-state">
+      {% if smtp_status == "neu" %}<span class="tag tag-warn">Passwort neu eingeben</span>
+      {% elif smtp_status == "leer" %}<span class="tag tag-outline">nicht eingerichtet</span>
+      {% elif smtp_status == "ungeprueft" %}<span class="tag tag-alert">ungeprüft</span><span class="meta">Er gilt schon, ist aber noch nicht geprüft.</span>
+      {% else %}<span class="tag tag-accent-2">geprüft</span><span class="meta">Testmail zuletzt verschickt am {{ smtp_checked }}</span>{% endif %}
+      {{ herkunft(smtp_hinweise) }}
+    </div>
+    {% if smtp_hinweise.abweichend %}
+    <div class="lock-note">In der Umgebung steht für <strong>{{ smtp_hinweise.abweichend|join(", ") }}</strong> ein anderer Wert. Es gilt der Wert hier. Die Umgebung wird nur beim allerersten Start gelesen.</div>
+    {% endif %}
+    {% if fehler.smtp %}<div class="check-note" role="alert" data-result="err"><p><strong>Prüfung fehlgeschlagen.</strong> {{ fehler.smtp }}</p></div>{% endif %}
+    <div class="row-fields">
+      <div class="field" style="flex:3"><label for="sm1">Server</label><input class="input" id="sm1" name="host" value="{{ smtp.host }}" required></div>
+      <div class="field" style="flex:1"><label for="sm2">Port</label><input class="input" id="sm2" name="port" inputmode="numeric" value="{{ smtp.port }}" required></div>
+    </div>
+    <div class="row-fields">
+      <div class="field"><label for="sm3">Benutzer</label><input class="input" id="sm3" name="user" value="{{ smtp.user }}" autocomplete="off" required></div>
+      <div class="field"><label for="sm4">Passwort</label><input class="input{% if fehler.smtp_passwort or fehler.smtp or smtp_status == 'neu' %} is-err{% endif %}" id="sm4" name="password" type="password"{% if smtp_status in ("geprueft", "ungeprueft") %} placeholder="leer lassen, dann bleibt es"{% endif %} autocomplete="new-password">
+        {% if fehler.smtp_passwort %}<p class="field-err" data-result="err">{{ fehler.smtp_passwort }}</p>
+        {% elif smtp_status in ("geprueft", "ungeprueft") %}<div class="field-state"><span class="tag tag-neutral">gesetzt</span></div>{% endif %}</div>
+    </div>
+    <div class="field"><label for="sm5">Absender</label><input class="input" id="sm5" name="from_address" value="{{ smtp.from_address }}" required></div>
+    <p class="meta">Ändern sich Server, Port oder Benutzer, musst du das Passwort neu eingeben. Beim Speichern schickt die App eine Testmail an dich ({{ admin_email }}).</p>
+    <button type="submit" class="btn btn-primary btn-inline">{% if fehler.smtp %}Erneut prüfen{% else %}Prüfen und speichern{% endif %}</button>
+  </form>
+</section>
+
+<section class="setup-section" id="s-termine">
+  <h3>Termine</h3>
+  <p class="meta">Gelten für alle Kalender.</p>
+  <form class="panel" method="post" action="/admin/setup/termine">
+    {% if termine_hinweise.umgebung or termine_hinweise.abweichend %}<div class="field-state">{{ herkunft(termine_hinweise) }}</div>{% endif %}
+    {% if fehler.termine %}<div class="check-note" role="alert" data-result="err"><p>{{ fehler.termine }}</p></div>{% endif %}
+    <div class="row-fields">
+      <div class="field"><label for="t1">Lieferzeit (17:00 bis 23:00)</label><input class="input{% if fehler.lieferzeit %} is-err{% endif %}" id="t1" name="delivery_time" type="time" min="17:00" max="23:00" value="{{ termine.delivery_time }}" required>
+        {% if fehler.lieferzeit %}<p class="field-err" data-result="err">{{ fehler.lieferzeit }}</p>
+        {% elif delivery_pending %}<p class="meta">Gilt ab {{ german_date(delivery_pending_from) }}. Bis dahin {{ current_delivery }}.</p>{% endif %}</div>
+      <div class="field"><label for="t2">Aufnahmefrist</label><input class="input" id="t2" name="recording_deadline" type="date" value="{{ termine.recording_deadline }}" required></div>
+    </div>
+    <div class="row-fields">
+      <div class="field"><label for="t3">Einladungstermin</label><input class="input" id="t3" name="invitation_date" type="date" value="{{ termine.invitation_date }}"></div>
+      <div class="field"><label for="t4">Anmeldelinks gültig bis</label><input class="input" id="t4" name="magic_link_valid_until" type="date" value="{{ termine.magic_link_valid_until }}" required></div>
+    </div>
+    <p class="meta">Der Einladungstermin verschickt nichts. Ab dem Tag zeigt „Personen“, wer noch keine Einladung bekommen hat.</p>
+    <button type="submit" class="btn btn-secondary btn-inline">Speichern</button>
+  </form>
+</section>
+
+<section class="setup-section" id="s-name">
+  <h3>Namen</h3>
+  <form class="panel" method="post" action="/admin/setup/name">
+    {% if name_hinweise.umgebung or name_hinweise.abweichend %}<div class="field-state">{{ herkunft(name_hinweise) }}</div>{% endif %}
+    <div class="field"><label for="n1">So nennt dich die Familie</label><input class="input" id="n1" name="admin_display_name" value="{{ display_name }}"></div>
+    <p class="meta">Steht in Mails und auf den Seiten der Familie statt „Admin“, z. B. „liegt jetzt bei {{ display_name or "Luca" }} zur Freigabe“.</p>
+    <div class="field"><label for="n2">Für wen ist der Kalender?</label><input class="input" id="n2" name="kind_name" value="{{ kind_name }}"></div>
+    <p class="meta">Steht in der Einladung, der Erinnerung und auf den Seiten der Familie, z. B. „Ein Adventskalender für {{ kind_name or "Emma" }}“. Für mehrere Kinder einfach „Emma und Paul“.</p>
+    <button type="submit" class="btn btn-secondary btn-inline">Speichern</button>
+  </form>
+</section>
+{% endblock %}

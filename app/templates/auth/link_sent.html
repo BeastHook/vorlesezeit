@@ -1,0 +1,13 @@
+{% extends "auth/_base.html" %}
+{% from "_advent.html" import schnee, ornament %}
+{% block title %}Link verschickt{% endblock %}
+{% block content %}
+{{ schnee() }}
+<div class="auth-card">
+  {{ ornament("stern", 46) }}
+  <span class="badge ok">✓</span>
+  <h2>Schau in dein Postfach</h2>
+  <p>Falls diese Adresse eingeladen ist, ist jetzt ein Anmeldelink unterwegs. Das kann ein paar Minuten dauern. Schau auch im Spam-Ordner nach.</p>
+  <a class="btn btn-secondary btn-inline" href="/login">Andere Adresse eingeben</a>
+</div>
+{% endblock %}

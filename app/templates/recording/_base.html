@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Vorlesezeit{% endblock %} · Vorlesezeit</title>
+<link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+</head>
+<body class="bereich-familie">
+{% from "_advent.html" import siegel_defs %}{{ siegel_defs() }}
+<div class="topbar">
+  <div class="brand"><img class="brand-mark" src="/static/ornaments/kerze-marke.svg" alt="" width="22" height="22">Vorlesezeit</div>
+  {% if person and person.is_admin %}<a class="role-link" href="/admin">Admin</a>{% endif %}
+</div>
+{% set path = request.url.path %}
+<div class="nav-wrap">
+<nav class="main-nav" aria-label="Hauptnavigation">
+  <a href="/record/campaign"{% if path.startswith('/record/campaign') or path.startswith('/record/auftrag') %} aria-current="page"{% endif %}>Meine Geschichten</a>
+  <a href="/record/free"{% if path.startswith('/record/free') %} aria-current="page"{% endif %}>Freie Nachricht</a>
+  <a href="/archiv"{% if path.startswith("/archiv") %} aria-current="page"{% endif %}>Archiv</a>
+</nav>
+</div>
+<main class="page{% block page_class %}{% endblock %}">
+{% block content %}{% endblock %}
+</main>
+<script src="/static/advent.js?v={{ asset_v }}" defer></script>
+</body>
+</html>

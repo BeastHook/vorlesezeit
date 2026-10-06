@@ -1,0 +1,12 @@
+{{ greeting }}
+
+{{ what }} passt so leider noch nicht ganz.
+
+{% if comment %}Anmerkung:
+{{ comment }}
+
+{% endif %}Magst du sie noch einmal aufnehmen? Lass dir ruhig Zeit. Über diesen Link kommst du direkt zur Aufnahme:
+
+{{ login_url }}
+
+{{ gruss }}

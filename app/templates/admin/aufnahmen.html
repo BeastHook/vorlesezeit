@@ -1,0 +1,122 @@
+{% extends "admin/_base.html" %}
+{% from "_advent.html" import siegel %}
+{% block title %}Aufnahmen{% endblock %}
+{% macro rec_row(row) %}
+<a class="rec-row{% if detail and detail.beitrag.id == row.beitrag.id %} sel{% endif %}" href="/admin/aufnahmen?beitrag_id={{ row.beitrag.id }}">{{ rec_check(row.beitrag) }}<div><div class="n">{{ row.name }}</div><div class="meta">{{ row.meta }}{% if row.title_open %} · <strong>Kapitelname offen</strong>{% endif %}</div>{{ chips(row.chips) }}</div><span class="{{ row.tag_class }}">{{ row.tag_label }}</span></a>
+{% endmacro %}
+{% macro rec_check(b) %}<input class="rec-check" type="checkbox" form="dl-form" name="ids" value="{{ b.id }}" tabindex="-1" aria-label="Zum Herunterladen auswählen">{% endmacro %}
+{% macro chips(items, mark=False) %}{% if items %}<div class="cal-chips">{% for c in items %}<span class="cal-chip{% if c.done %} done{% endif %}">{{ c.label }}{% if mark and c.done %} · ausgeliefert{% endif %}</span>{% endfor %}</div>{% endif %}{% endmacro %}
+{% block content %}
+<div class="split">
+  <div data-dl>
+    {% set dl_count = day_rows|length + free_rows|length + detached_beitraege|length %}
+    {% if dl_count %}
+    <form class="dl-bar" id="dl-form" method="get" action="/admin/aufnahmen/download">
+      <a class="btn btn-secondary btn-inline" href="/admin/aufnahmen/download" data-role="dl-alle">Download alle</a>
+      <button type="button" class="btn btn-ghost btn-inline" data-role="auswahl">Auswahl</button>
+      <button type="button" class="btn btn-ghost btn-inline" data-role="abbrechen" hidden>Abbrechen</button>
+      <span class="meta" data-role="hinweis" data-alle="{{ dl_count }} {{ 'Aufnahme' if dl_count == 1 else 'Aufnahmen' }} · ZIP">{{ dl_count }} {{ 'Aufnahme' if dl_count == 1 else 'Aufnahmen' }} · ZIP</span>
+    </form>
+    {% endif %}
+    <h3>Türchen-Aufnahmen</h3>
+    <div class="rec-list">
+      {% for row in day_rows %}{{ rec_row(row) }}{% else %}<p class="meta">Noch keine Aufnahmen.</p>{% endfor %}
+    </div>
+    <h3 style="margin-top:var(--space-6)">Eingang ohne Türchen</h3>
+    <p class="meta">Freie Nachrichten werden nie automatisch aufgespielt (R20).</p>
+    <div class="rec-list">
+      {% for row in free_rows %}{{ rec_row(row) }}{% else %}<p class="meta">Keine freien Nachrichten.</p>{% endfor %}
+    </div>
+    {% if detached_beitraege %}
+    <h3 class="section">Vom Türchen gelöst</h3>
+    <p class="meta">Nach einer Neuvergabe vom Türchen gelöst (R35). Sie werden nie ausgeliefert und bleiben im Archiv der Person, bis du sie löschst.</p>
+    <div class="rec-list">
+      {% for b in detached_beitraege %}
+      <div class="rec-row">{{ rec_check(b) }}<div><div class="n">{{ b.title or "Aufnahme ohne Titel" }}</div><div class="meta">gelöst · {{ b.person.display_name or b.person.email }}</div></div><a class="btn btn-danger push-right" href="/admin/aufnahmen/{{ b.id }}/loeschen">Löschen …</a></div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <form class="panel" style="margin-top:var(--space-6)" method="post" action="/admin/aufnahmen/upload" enctype="multipart/form-data">
+      <div class="panel-kicker">Einspringen (R15)</div>
+      <div class="panel-title">Audiodatei in ein Türchen legen</div>
+      {% if upload_slots %}
+      <div class="field"><label for="upload-slot">Kalendertag</label><select class="input" id="upload-slot" name="slot_id">
+        {% for u in upload_slots %}<option value="{{ u.slot.id }}">{{ u.label }}</option>{% endfor %}
+      </select></div>
+      <label class="drop">Datei wählen (mp3, m4a, wav, ogg …)<br><input type="file" name="file" accept="audio/*" required><br><span class="meta">Wird normalisiert wie eine Aufnahme und muss danach freigegeben werden.</span></label>
+      <button type="submit" class="btn btn-secondary btn-inline" data-busy="Lädt hoch …" data-done="Hochgeladen ✓">Hochladen</button>
+      {% else %}
+      <p class="meta">Alle Türchen haben schon eine Aufnahme.</p>
+      {% endif %}
+    </form>
+  </div>
+
+  {% if detail %}
+  {% set b = detail.beitrag %}
+  <div class="panel roomy">
+    <div class="btn-row-left"><div style="flex:1"><div class="panel-kicker">{% if b.auftrag %}Gesprochen von {{ detail.who }}{% else %}Freie Nachricht · von {{ detail.who }}{% endif %}</div>
+      <h2 class="panel-heading">{{ detail.name }}</h2></div><span class="{{ detail.tag_class }}">{{ detail.tag_label }}</span>{% if detail.state_key == "freigegeben" %}{{ siegel(b.person.display_name, b.id|siegel_kontur, 58, stamp=detail.stamped) }}{% endif %}</div>
+    {{ chips(detail.chips, mark=True) }}
+    {% if detail.lock %}<div class="lock-note"><strong>{{ detail.lock.campaign.name }} · Tag {{ detail.lock.day }} ist schon fest oder ausgeliefert.</strong> Ablehnen und Rücknahme der Freigabe sind gesperrt, weil sie für alle Kalender des Auftrags gelten würden.</div>{% endif %}
+    <audio controls preload="metadata" style="width:100%" src="{{ detail.audio_url }}" data-role="audio"></audio>
+
+    <form method="post" action="/admin/aufnahmen/{{ b.id }}/zuschnitt" data-role="trim-form">
+      <div class="field"><label for="chapter-title">Kapitelname auf dem Tonie (vorbelegt aus dem Titel)</label><input class="input" id="chapter-title" name="chapter_title" maxlength="100" value="{{ detail.chapter_value }}"></div>
+      <div style="margin-top:var(--space-4)">
+        <div class="btn-row-left" style="justify-content:space-between"><span class="meta">Zuschnitt: Griffe ziehen oder Zeiten eintragen</span><strong class="meta" data-role="cut-summary"></strong></div>
+        <div class="wave" data-audio-src="{{ detail.audio_url }}" hidden>
+          <canvas></canvas>
+          <div class="cut" data-role="cut-left" style="left:0;width:0"></div><div class="cut" data-role="cut-right" style="right:0;width:0"></div>
+          <div class="playhead" data-role="playhead"></div>
+          <div class="handle" data-role="handle-start" style="left:0" role="slider" aria-label="Start" tabindex="0"><span class="bubble"></span></div><div class="handle" data-role="handle-end" style="left:100%" role="slider" aria-label="Ende" tabindex="0"><span class="bubble"></span></div>
+        </div>
+        <div data-role="preview" hidden>
+          <label class="live-toggle"><input type="checkbox" data-role="live" checked> Beim Ziehen mithören</label>
+          <div class="preview-row">
+            <button type="button" class="btn btn-primary btn-inline" data-role="play-cut">&#9654; Ausschnitt anhören</button>
+            <button type="button" class="btn btn-secondary" data-role="play-head">Anfang anhören (3 s)</button>
+            <button type="button" class="btn btn-secondary" data-role="play-tail">Schluss anhören (3 s)</button>
+            <button type="button" class="btn btn-ghost" data-role="play-stop">&#9632; Stopp</button>
+          </div>
+        </div>
+        <div class="row-fields" style="margin-top:var(--space-3)">
+          <div class="field"><label for="cut-start">Start</label><input class="input" id="cut-start" name="cut_start" inputmode="decimal" placeholder="0:00,0" value="{{ detail.cut_start }}" data-role="cut-start"></div>
+          <div class="field"><label for="cut-end">Ende</label><input class="input" id="cut-end" name="cut_end" inputmode="decimal" placeholder="Ende der Aufnahme" value="{{ detail.cut_end }}" data-role="cut-end"></div>
+        </div>
+        <div class="btn-row-left" style="margin-top:var(--space-3)"><button type="submit" name="action" value="save" class="btn btn-secondary">Kapitelname &amp; Zuschnitt speichern</button><button type="submit" name="action" value="reset" class="btn btn-ghost">Zuschnitt zurücksetzen</button></div>
+        <p class="meta" style="margin-top:var(--space-2)">Die abgelegte Datei bleibt unverändert; geschnitten wird erst beim Aufspielen (R41).</p>
+      </div>
+    </form>
+    <hr class="div">
+    <div class="btn-row-left">
+      <form method="post" action="/admin/aufnahmen/{{ b.id }}/freigeben"><button type="submit" class="btn btn-primary btn-inline"{% if detail.state_key == "freigegeben" %} disabled{% endif %}>Freigeben</button></form>
+      <form method="post" action="/admin/aufnahmen/{{ b.id }}/zuruecknehmen"><button type="submit" class="btn btn-secondary"{% if detail.state_key != "freigegeben" or detail.lock %} disabled{% endif %}>Freigabe zurücknehmen</button></form>
+    </div>
+    {% if detail.state_key == "eingereicht" and not detail.lock %}
+    <details><summary class="btn btn-secondary btn-inline" style="list-style:none">Ablehnen …</summary>
+      <form method="post" action="/admin/aufnahmen/{{ b.id }}/ablehnen">
+        <div class="field" style="margin-top:var(--space-3)"><label for="reject-comment">Kommentar an {{ detail.who }} (optional, steht in der Mail)</label><textarea class="input" id="reject-comment" name="comment" style="min-height:90px" placeholder="z. B. Am Ende fehlt ein Stück. Magst du es noch mal aufnehmen?"></textarea></div>
+        <button type="submit" class="btn btn-danger" style="margin-top:var(--space-2)" data-busy="Wird verschickt …" data-done="Verschickt ✓">Ablehnen &amp; Mail schicken</button>
+      </form>
+    </details>
+    {% endif %}
+    <hr class="div">
+    <div class="btn-row-left">
+      {% if detail.state_key == "freigegeben" %}
+      <form method="post" action="/admin/auslieferung/manuell">
+        <input type="hidden" name="beitrag_id" value="{{ b.id }}"><input type="hidden" name="order_{{ b.id }}" value="1">
+        <button type="submit" class="btn btn-secondary" data-busy="Wird gestartet …" data-done="Gestartet ✓">Jetzt auf den Tonie aufspielen</button>
+      </form>
+      {% endif %}
+      <a class="btn btn-danger push-right" href="/admin/aufnahmen/{{ b.id }}/loeschen">Endgültig löschen …</a>
+    </div>
+    {% if detail.state_key == "freigegeben" %}
+    <p class="meta">„Jetzt aufspielen“ ersetzt den Inhalt des Tonie sofort durch diesen Beitrag und prüft das Ergebnis nach. Für mehrere Beiträge zugleich: Auslieferung › Manueller Lauf.</p>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="panel roomy"><p class="meta">Wähle links eine Aufnahme aus.</p></div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/trim.js?v={{ asset_v }}" defer></script>{% endblock %}

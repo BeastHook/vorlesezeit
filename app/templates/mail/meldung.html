@@ -1,0 +1,9 @@
+{% extends "mail/_base.html" %}
+{% block body %}
+<div style="background:{{ '#7a8a5e' if ok else '#b5412c' }};border-radius:6px;height:6px;margin:0 0 16px"></div>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;font-family:Figtree,Arial,sans-serif;font-size:14px;line-height:1.5;color:#2a2018">
+{% for line in lines %}{% if line.strip() %}
+<tr><td style="padding:2px 0;padding-left:{{ (line|length - line.lstrip()|length) * 6 }}px">{{ line.strip() }}</td></tr>
+{% endif %}{% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "admin/_base.html" %}
+{% block title %}Einrichten{% endblock %}
+{% block content %}
+<div class="auth-card" style="max-width:520px;margin-left:auto;margin-right:auto;text-align:left;align-items:stretch">
+  <h2>Adventskalender einrichten</h2>
+  <p style="max-width:none">Noch gibt es keine Kampagne. Beim Anlegen entstehen die 24 Türchen; Personen, Geschichten, Tonie und Ersatzbeitrag pflegst du danach in den Reitern.</p>
+  <form method="post" action="/admin/campaign">
+    <button type="submit" class="btn btn-primary">Kampagne mit 24 Türchen anlegen</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,19 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+docs/
+tests/
+# U6-Generalprobe: scripts/rehearsal.py braucht die synthetischen
+# Audio-Fixtures im Image (siehe Dockerfile).
+!tests/fixtures/
+!tests/fixtures/**
+*.md
+.venv/
+venv/
+__pycache__/
+*.pyc
+.claude/
+.remember/
+*-handoff.zip

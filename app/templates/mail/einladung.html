@@ -1,0 +1,17 @@
+{% extends "mail/_base.html" %}{% from "mail/_base.html" import knopf %}
+{% block body %}
+<p style="margin:0 0 12px">Hallo,</p>
+<p style="margin:0 0 12px">{% if kind %}dieses Jahr gibt es für {{ kind }} einen besonderen Adventskalender{% else %}dieses Jahr gibt es einen besonderen Familien-Adventskalender{% endif %}: An jedem Morgen vom 1. bis 24. Dezember wartet auf der Toniebox eine neue Weihnachtsgeschichte. Gelesen wird sie nicht von irgendwem, sondern von euch, der Familie.</p>
+<p style="margin:0 0 4px"><strong>So geht’s:</strong></p>
+<ol style="margin:0 0 12px;padding-left:22px">
+<li>Über den Knopf unten kommst du zu deinen Geschichten. Du brauchst kein Passwort und musst nichts installieren, das Handy genügt.</li>
+<li>Such dir einen ruhigen Moment, erlaube das Mikrofon und lies die Geschichte vom Bildschirm vor. Versprecher sind kein Problem, du kannst sie dir anhören und so oft neu aufnehmen, wie du möchtest.</li>
+<li>Wenn sie dir gefällt, schickst du sie ab. Den Rest erledige ich: Am Abend vor deinem Tag landet sie auf dem Tonie{% if kind %} für {{ kind }}{% endif %}.</li>
+</ol>
+<p style="margin:0 0 12px">Ob es eine vorgeschlagene Geschichte ist oder deine eigene, siehst du in der App. Wer mag, kann auch einfach eine kleine Nachricht{% if kind %} für {{ kind }}{% endif %} einsprechen.</p>
+<p style="margin:0 0 12px"><strong>Aufnehmen kannst du bis zum {{ deadline }}.</strong> Dein Link gilt bis zum {{ valid_until }}. Nach jedem Adventstag könnt ihr alle die Geschichten der anderen im Archiv nachhören.</p>
+<p style="margin:0 0 12px">Danke, dass du mitmachst. {% if kind %}Das wird {{ kind }} riesig freuen!{% else %}Das wird eine Freude!{% endif %}</p>
+{{ knopf(login_url, "Zum Adventskalender") }}
+<p style="margin:16px 0 0;white-space:pre-line">{{ gruss }}</p>
+<p style="margin:18px 0 0;font-size:12px;color:#6b5b48;word-break:break-all">Falls der Knopf nicht geht: {{ login_url }}</p>
+{% endblock %}

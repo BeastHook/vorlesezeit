@@ -1,0 +1,29 @@
+{% extends "admin/_base.html" %}
+{% set name = tonie.name or ("…" ~ tonie.tonie_id[-4:]) %}
+{% block title %}{% if target %}Umhängen{% else %}Trennen{% endif %}{% endblock %}
+{% block content %}
+<div class="panel warm panel-narrow">
+  {% if target %}
+  <div class="panel-kicker">{{ name }} zu {{ target.name }}?</div>
+  <p>Die App nimmt das Kapitel{% if tonie.campaign %} von {{ tonie.campaign.name }}{% endif %} sofort von {{ name }}. Ab dem nächsten Abend bekommt {{ name }} die Geschichten von {{ target.name }}.</p>
+  {% else %}
+  <div class="panel-kicker">{{ name }} trennen?</div>
+  <p>{{ name }} gehört dann zu keinem Kalender mehr. Die App nimmt <strong>ihr Kapitel sofort</strong> von diesem Tonie. Alles andere auf dem Tonie bleibt.</p>
+  {% endif %}
+  {% if tonie.campaign %}
+  <p class="meta">{% if others %}{{ tonie.campaign.name }} läuft weiter auf {{ others|map(attribute="name")|join(", ") }}.{% else %}{{ tonie.campaign.name }} hat danach keinen Tonie mehr.{% endif %}</p>
+  {% endif %}
+  {% if busy %}
+  <div class="lock-note"><strong>{{ name }} wird gerade bespielt.</strong> Bitte warte, bis der Lauf endet, und lade die Seite dann neu.</div>
+  {% endif %}
+  <form method="post" action="/admin/setup/tonies/{{ tonie.id }}/umhaengen" class="btn-row-left" data-busy="Kapitel wird abgeräumt …">
+    <input type="hidden" name="kalender" value="{{ target.id if target else '' }}">
+    {% if target %}
+    <button type="submit" class="btn btn-primary btn-inline"{% if busy %} disabled{% endif %}>Umhängen</button>
+    {% else %}
+    <button type="submit" class="btn btn-danger"{% if busy %} disabled{% endif %}>Trennen und Kapitel abräumen</button>
+    {% endif %}
+    <a class="btn btn-ghost" href="/admin/setup#s-konten">Abbrechen</a>
+  </form>
+</div>
+{% endblock %}

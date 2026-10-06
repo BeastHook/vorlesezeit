@@ -1,0 +1,10 @@
+Hallo,
+
+hier ist dein persönlicher Schlüssel zum Familien-Adventskalender. Ein Tipp genügt, und du bist drin:
+
+{{ login_url }}
+
+Der Link gilt bis zum {{ valid_until }} und beliebig oft.
+Aufnehmen kannst du bis zum {{ deadline }}.
+
+{{ gruss }}

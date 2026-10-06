@@ -1,0 +1,129 @@
+{% extends "recording/_base.html" %}
+{% from "_advent.html" import ornament %}
+{% block title %}{{ 'Aufnahme' if auftrag else 'Freie Nachricht' }}{% endblock %}
+{% block page_class %} page-lesen{% endblock %}
+{% block content %}
+<div id="recorder-app" data-submit-url="{{ submit_url }}">
+
+  {% if auftrag %}
+  <div class="page-head">
+    <span class="tag">Deine Geschichte</span>
+    <span class="row-due">Aufnehmen bis {{ deadline_label }}</span>
+    {{ ornament(auftrag.id|ornament_name, 34, "orn-%d"|format(auftrag.id)) }}
+  </div>
+  <h2>{{ auftrag.title or "Eigene Geschichte" }}</h2>
+  {% else %}
+  <div class="page-head"><span class="tag tag-accent-2">Freie Nachricht</span>{{ ornament("kerze", 34) }}</div>
+  <h2>Sag, was du magst</h2>
+  <p class="lead">Ohne Termin und ohne Vorlesetext. Die Nachricht geht nur an {{ admin.acc }} und kommt nie von allein auf den Tonie.</p>
+  {% endif %}
+
+  {% if has_suggestion %}
+  <div class="choice-row">
+    <button type="button" class="choice-btn selected" data-choice="suggestion">Vorschlag vorlesen</button>
+    <button type="button" class="choice-btn" data-choice="own">Eigene Geschichte</button>
+  </div>
+  {% endif %}
+
+  {% if auftrag and auftrag.vorlesetext %}
+  <div data-role="story-wrap">
+    <div class="story-controls">
+      <label>Tempo <input type="range" min="0" max="30" step="any" value="8" data-role="scroll-speed"></label>
+      <label>Schrift <input type="range" min="16" max="28" value="17" data-role="font-size"></label>
+    </div>
+    <div class="story-card" data-role="story-scroll">
+      <p data-role="story-text" class="story-text">{{ auftrag.vorlesetext }}</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="field field-spaced" data-role="title-field" {% if has_suggestion %}hidden{% endif %}>
+    <label for="title-input">Titel deiner {{ 'Geschichte' if auftrag else 'Nachricht' }}</label>
+    <input class="input" id="title-input" type="text" name="title" maxlength="100" placeholder="{{ 'z. B. Der Mond zählt mit' if auftrag else 'z. B. Grüße an Paul' }}">
+  </div>
+
+  <div class="fixed-bottom">
+
+    <section data-state="idle" hidden>
+      <button type="button" class="rec-btn idle" data-role="record-btn">Aufnehmen</button>
+      <p class="rec-hint">Lies in Ruhe vor. Du kannst dir alles anhören und so oft neu aufnehmen, wie du magst.</p>
+    </section>
+
+    <section data-state="recording" hidden>
+      <span class="rec-halo"><button type="button" class="rec-btn live" data-role="stop-btn"><span>Fertig</span><span class="rec-time" data-role="timer">00:00</span></button></span>
+      <p class="rec-hint rec-hint-live">Läuft. Sprich einfach weiter.</p>
+    </section>
+
+    <section data-state="review" hidden>
+      <div class="rec-time" data-role="timer">00:00</div>
+      <div class="btn-stack">
+        <button type="button" class="btn btn-secondary" data-role="play-btn">▶ Anhören</button>
+        <button type="button" class="btn btn-secondary" data-role="rerecord-btn">Neu aufnehmen</button>
+        <button type="button" class="btn btn-primary" data-role="submit-btn">Abschicken</button>
+      </div>
+      <p class="note">Nur du und {{ admin.nom }} hören die Aufnahme, bis sie auf dem Tonie ist.</p>
+    </section>
+
+    <section data-state="interrupted" hidden>
+      <span class="tag tag-alert">Unterbrochen, Aufnahme erhalten</span>
+      <p class="rec-hint">Der Bildschirm wurde gesperrt oder du hast die Seite verlassen. An der Unterbrechungsstelle kann Material verfälscht sein. Hör einmal bis zum Ende, bevor du abschickst.</p>
+      <div class="rec-time" data-role="timer">00:00</div>
+      <div class="btn-stack">
+        <button type="button" class="btn btn-secondary" data-role="rerecord-btn">Neu aufnehmen</button>
+        <button type="button" class="btn btn-secondary" data-role="play-btn">▶ Bis zum Ende anhören</button>
+        <button type="button" class="btn btn-primary" data-role="submit-btn" disabled>Abschicken (erst nach vollständigem Anhören)</button>
+      </div>
+    </section>
+
+    <section data-state="uploading" hidden>
+      <div class="progress"><div data-role="progress-fill"></div></div>
+      <p class="rec-hint">Wird übertragen und aufbereitet. Bitte die Seite geöffnet lassen.</p>
+      <button type="button" class="btn btn-primary" disabled>Abschicken</button>
+    </section>
+
+    <section data-state="failed" hidden>
+      <span class="tag tag-alert">Übertragung fehlgeschlagen</span>
+      <p class="rec-hint" data-role="failed-reason">Die Übertragung ist fehlgeschlagen.</p>
+      <div class="btn-stack">
+        <button type="button" class="btn btn-secondary" data-role="play-btn">▶ Anhören</button>
+        <button type="button" class="btn btn-primary" data-role="retry-btn">Erneut versuchen</button>
+      </div>
+    </section>
+
+    <section data-state="denied" hidden class="center-card state-card">
+      <div class="badge warn">🎙</div>
+      <h3>Mikrofonzugriff nötig</h3>
+      <p class="meta" data-role="denied-reason">Dieses Gerät hat den Mikrofonzugriff bisher verweigert.</p>
+      <ol data-role="denied-steps" class="steps"></ol>
+      <button type="button" class="btn btn-secondary" onclick="location.reload()">Seite neu laden</button>
+    </section>
+
+    <section data-state="embedded-browser" hidden class="center-card state-card">
+      <div class="badge warn">↗</div>
+      <h3>Im richtigen Browser öffnen</h3>
+      <p class="meta">Diese Seite läuft gerade in einer eingebetteten Ansicht (z. B. der Mail-App) und kann dort nicht aufnehmen. Öffne den Link stattdessen in Safari oder Chrome.</p>
+      <div class="copy-box">
+        <span data-role="copy-link-value"></span>
+        <button type="button" data-role="copy-link-button">Kopieren</button>
+      </div>
+      <p class="note">Adresse kopieren, App wechseln, in der Adressleiste einfügen.</p>
+      <details class="debug-details">
+        <summary class="note">Technische Details</summary>
+        <pre data-role="debug-info"></pre>
+      </details>
+    </section>
+
+    <section data-state="dead-end" hidden class="center-card state-card">
+      <div class="badge warn">✕</div>
+      <h3>Dieses Gerät kann hier nicht aufnehmen</h3>
+      <p class="meta">Kein Problem: Nimm die Geschichte stattdessen mit der Sprachmemo-App deines Geräts auf und schick sie {{ admin.dat }}. {{ admin.Nom }} spielt sie für dich ein.</p>
+      <details class="debug-details">
+        <summary class="note">Technische Details</summary>
+        <pre data-role="debug-info"></pre>
+      </details>
+    </section>
+
+  </div>
+</div>
+<script src="/static/recorder.js?v={{ asset_v }}" defer></script>
+{% endblock %}

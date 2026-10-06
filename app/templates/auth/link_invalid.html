@@ -1,0 +1,10 @@
+{% extends "auth/_base.html" %}
+{% block title %}Link ungültig{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <span class="badge warn">!</span>
+  <h2>Dieser Link gilt nicht mehr</h2>
+  <p>Er ist abgelaufen oder wurde zurückgezogen. Mit einem neuen Link geht es sofort weiter.</p>
+  <a class="btn btn-primary" href="/login">Neuen Link anfordern</a>
+</div>
+{% endblock %}

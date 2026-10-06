@@ -1,0 +1,13 @@
+{% extends "admin/_base.html" %}
+{% block title %}Aufnahme löschen{% endblock %}
+{% block content %}
+<div class="panel roomy panel-narrow">
+  <div class="panel-kicker">{% if days %}{{ days }}{% elif beitrag.auftrag %}Ohne Kalendertag{% elif beitrag.detached_at %}Vom Türchen gelöst{% else %}Freie Nachricht{% endif %} · {{ beitrag.person.display_name or beitrag.person.email }}</div>
+  <h2 class="panel-heading">„{{ name }}“ endgültig löschen?</h2>
+  <p>Die Audiodatei und der Eintrag werden entfernt. Das lässt sich nicht rückgängig machen. Was bereits auf dem Tonie ist, bleibt dort.</p>
+  <div class="btn-row-left">
+    <form method="post" action="/admin/aufnahmen/{{ beitrag.id }}/loeschen"><button type="submit" class="btn btn-danger" data-busy="Wird gelöscht …" data-done="Gelöscht ✓">Endgültig löschen</button></form>
+    <a class="btn btn-ghost" href="/admin/aufnahmen?beitrag_id={{ beitrag.id }}">Abbrechen</a>
+  </div>
+</div>
+{% endblock %}

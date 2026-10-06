@@ -1,0 +1,39 @@
+# Secrets / Tonies-Account
+.env
+.env.*
+!.env.example
+*.token.json
+.tonie-session*
+credentials.json
+
+# Audio-Aufnahmen: gehoeren nie ins Repo (Groesse + Stimmen von Familienmitgliedern)
+recordings/
+uploads/
+*.mp3
+*.wav
+*.m4a
+*.webm
+*.ogg
+*.opus
+# Ausnahme: kleine Test-Fixtures
+!tests/fixtures/*.mp3
+!tests/fixtures/*.wav
+
+# Dependencies / Build
+node_modules/
+dist/
+build/
+.next/
+__pycache__/
+.venv/
+venv/
+
+# OS / Editor
+.DS_Store
+*.swp
+.idea/
+
+# Design-Handoff-Bundles: entpackter Inhalt liegt in docs/design/
+*-handoff.zip
+
+.superpowers/

@@ -1,0 +1,146 @@
+# Betrieb auf dem Heimserver (U14, KTD11/14/15/19). Anleitung: docs/betrieb.md.
+#
+#   docker compose -f docker-compose.heimserver.yml --env-file .env.heimserver up -d --build
+#
+# Kein Dienst veroeffentlicht einen Port: die App ist nur ueber den Cloudflare
+# Tunnel erreichbar (KTD15), MinIO nur im internen Netz (KTD17). Alle Werte
+# kommen aus der Umgebung; fehlt ein Pflichtwert, bricht compose schon beim
+# Einlesen ab. Die eingecheckten Entwicklungswerte aus docker-compose.yml
+# gelten hier nicht.
+#
+# Eigener Projektname, damit die Produktionsvolumes nie die lokalen
+# Demo-Daten des Entwicklungsaufbaus (Projekt "vorlesezeit") uebernehmen.
+# Bis 2026-10-06 hiess das Projekt "toniapply-heimserver"; die Volumes tragen
+# diesen Namen weiter (siehe unten).
+name: vorlesezeit-heimserver
+
+x-storage-env: &storage-env
+  STORAGE_ENDPOINT_URL: http://minio:9000
+  STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt (eigener MinIO-Benutzer)}
+  STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt (langes Zufallspasswort fuer MinIO)}
+  STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET fehlt}
+  STORAGE_REGION: us-east-1
+
+services:
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt}
+    volumes:
+      - minio-data:/data
+
+  createbuckets:
+    image: quay.io/minio/mc:latest
+    depends_on:
+      - minio
+    environment:
+      <<: *storage-env
+    # $$: die Shell im Container setzt die Werte ein, nicht compose -- so
+    # stehen die Zugangsdaten nicht in der Kommandozeile des Containers.
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 \"$$STORAGE_ACCESS_KEY\" \"$$STORAGE_SECRET_KEY\" >/dev/null; do
+        echo 'warte auf minio...'; sleep 1;
+      done;
+      mc mb --ignore-existing \"local/$$STORAGE_BUCKET\";
+      "
+
+  app:
+    build: .
+    image: vorlesezeit-heimserver
+    restart: unless-stopped
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+    environment:
+      <<: *storage-env
+      APP_TIMEZONE: Europe/Berlin
+      # Alter Dateiname im Produktionsvolume, bewusst nicht umbenannt.
+      DATABASE_PATH: /data/toniapply.db
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:?SESSION_SECRET_KEY fehlt (langer Zufallswert, nie der Entwicklungswert)}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL fehlt}
+      # Mehrkalender U3 (R27/R28/R29): SMTP, tonies-Konto und Termine sind
+      # nur noch optionale Startwerte -- je Feld einmal in die DB uebernommen,
+      # danach pflegt sie das Setup. Die App startet auch ohne sie.
+      MAGIC_LINK_VALID_UNTIL: ${MAGIC_LINK_VALID_UNTIL:-}
+      RECORDING_DEADLINE: ${RECORDING_DEADLINE:-}
+      INVITATION_DATE: ${INVITATION_DATE:-}
+      ADMIN_DISPLAY_NAME: ${ADMIN_DISPLAY_NAME:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp-relay.brevo.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTPUSER: ${SMTPUSER:-}
+      SMTPPW: ${SMTPPW:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-${SMTPUSER:-}}
+      TONIE_USERNAME: ${TONIE_USERNAME:-}
+      TONIE_PASSWORD: ${TONIE_PASSWORD:-}
+      TONIE_DELIVERY_TIME: ${TONIE_DELIVERY_TIME:-}
+      # KTD4/R18: verschluesselt die Passwoerter in der DB. Getrennt von der
+      # Sicherung aufbewahren (nie mit ihr auf dem zweiten Medium): ohne ihn
+      # sind die Passwoerter in einer Sicherung wertlos. Fehlt er, startet die
+      # App trotzdem; Passwoerter sind dann "neu eingeben" (R21).
+      CREDENTIALS_KEY: ${CREDENTIALS_KEY:-}
+      TRIGGER_SECRET: ${TRIGGER_SECRET:?TRIGGER_SECRET fehlt (langer Zufallswert)}
+      BACKUP_MARKER_PATH: /backup-marker/last-success
+    volumes:
+      # Frische Produktionsdatenbank; liegt nie auf einer Netzwerkfreigabe (KTD16).
+      - db-data:/data
+      - backup-marker:/backup-marker:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/status', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN fehlt (Cloudflare Zero Trust, Tunnel)}
+
+  # KTD14: bewusst dumm, ruft nur im Takt auf; Faelligkeit entscheidet die App.
+  scheduler:
+    image: vorlesezeit-heimserver
+    command: ["python", "deploy/scheduler/scheduler.py"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      TRIGGER_SECRET: ${TRIGGER_SECRET:?TRIGGER_SECRET fehlt}
+
+  # KTD19: naechtliche Sicherung auf das zweite Medium (BACKUP_TARGET_PATH).
+  backup:
+    image: vorlesezeit-heimserver
+    command: ["python", "deploy/backup/backup.py"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      <<: *storage-env
+      DATABASE_PATH: /data/toniapply.db
+      BACKUP_TARGET_DIR: /backup
+      BACKUP_MARKER_PATH: /backup-marker/last-success
+    volumes:
+      - db-data:/data
+      - backup-marker:/backup-marker
+      - ${BACKUP_TARGET_PATH:?BACKUP_TARGET_PATH fehlt (Verzeichnis auf dem zweiten Medium)}:/backup
+
+# Die Produktionsdaten liegen in den Volumes des frueheren Projekts
+# "toniapply-heimserver". Extern eingebunden statt umgezogen: fehlt eines,
+# bricht compose ab, statt still ein leeres anzulegen.
+volumes:
+  db-data:
+    external: true
+    name: toniapply-heimserver_db-data
+  minio-data:
+    external: true
+    name: toniapply-heimserver_minio-data
+  backup-marker:
+    external: true
+    name: toniapply-heimserver_backup-marker

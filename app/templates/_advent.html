@@ -1,0 +1,45 @@
+{% macro ornament(name, size=48, vt=None) -%}
+<img class="ornament" src="/static/ornaments/{{ name }}.svg" alt="" width="{{ size }}" height="{{ size }}"{% if vt %} style="view-transition-name: {{ vt }}"{% endif %}>
+{%- endmacro %}
+
+{% macro tuerchen(state, ornament=None, number=None, flicker=True, vt=None, announce=True) -%}
+{#- announce=False: R10 verbietet im Familienbereich den Rueckfall auf eine
+   Tuerchennummer als lesbaren Text (app/archive/visibility.py, FALLBACK_TITLE);
+   dort bleibt die Ziffer rein visuell. Im Adminbereich (Kalenderliste) soll
+   sie dagegen angesagt werden (Final-Review-Fund). -#}
+<span class="tuerchen is-{{ state }}{% if not flicker %} is-still{% endif %}" data-zu="is-{{ state }}"{% if number is none or not announce %} aria-hidden="true"{% endif %}>
+  <span class="rahmen"><span class="licht"></span></span>
+  <span class="klappe"><span class="vorne">
+    {%- if number is not none %}<span class="ziffer"{% if announce %} aria-hidden="true"{% endif %}>{{ number }}</span>{% if announce %}<span class="visually-hidden">Türchen {{ number }}</span>{% endif %}
+    {%- elif ornament %}<img class="ornament" src="/static/ornaments/{{ ornament }}.svg" alt="" width="40" height="40"{% if vt %} style="view-transition-name: {{ vt }}"{% endif %}>{% endif -%}
+  </span><span class="hinten"></span></span>
+</span>
+{%- endmacro %}
+
+{% macro siegel(name, kontur, size=120, stamp=False) -%}
+{% set ini = name|initialen %}
+<svg class="siegel{% if stamp %} is-stamp{% endif %}" width="{{ size }}" height="{{ size }}" viewBox="0 0 100 100" role="img" aria-label="Versiegelt von {{ name or 'dir' }}">
+  <use href="#wachs-{{ kontur }}" class="wachs"/>
+  <circle class="praegung" cx="50" cy="51" r="23"/>
+  <circle class="ring" cx="50" cy="51" r="19"/>
+  {% if ini %}<text x="50" y="52" font-size="{{ 24 if ini|length == 1 else 19 }}">{{ ini }}</text>
+  {% else %}<path class="stern" d="M50 36l3.4 10 10.6 5-10.6 5L50 66l-3.4-10-10.6-5 10.6-5z"/>{% endif %}
+</svg>
+{%- endmacro %}
+
+{% macro siegel_defs() -%}
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <radialGradient id="wachs" cx=".34" cy=".3" r=".8"><stop offset="0" stop-color="#d8694f"/><stop offset=".35" stop-color="#b03f29"/><stop offset=".75" stop-color="#86281a"/><stop offset="1" stop-color="#6a1d12"/></radialGradient>
+  <radialGradient id="praegung" cx=".5" cy=".55" r=".6"><stop offset="0" stop-color="#8e2a1b"/><stop offset=".8" stop-color="#a13623"/><stop offset="1" stop-color="#c4553c"/></radialGradient>
+  <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6e2a4"/><stop offset=".5" stop-color="#c9963c"/><stop offset="1" stop-color="#f0d58c"/></linearGradient>
+  <symbol id="wachs-1" viewBox="0 0 100 100"><path d="M50 12C62 11 70 18 78 20C88 23 90 34 87 44C85 51 92 55 90 63C88 73 79 76 73 83C66 90 55 88 47 89C37 90 27 86 21 79C14 72 9 64 12 54C14 46 8 40 12 32C17 22 28 21 36 16C41 13 45 12 50 12Z"/><path d="M87 72C90 70 94 72 93 76C92 79 88 79 87 77Z"/></symbol>
+  <symbol id="wachs-2" viewBox="0 0 100 100"><path d="M48 14C58 10 69 15 76 22C83 29 88 36 86 46C85 54 88 60 94 66C98 70 96 78 90 79C84 80 80 76 76 80C70 87 60 90 50 88C40 87 30 88 23 81C16 74 13 66 14 57C15 49 11 42 14 34C18 24 30 18 40 15C43 14 46 14 48 14Z"/></symbol>
+  <symbol id="wachs-3" viewBox="0 0 100 100"><path d="M52 13C63 14 73 16 80 25C87 34 86 44 87 52C88 62 84 72 76 80C68 87 58 87 50 86C42 86 36 90 28 88C20 86 20 80 15 74C9 67 4 62 7 55C9 50 15 49 14 42C13 33 18 24 27 19C35 14 44 12 52 13Z"/><path d="M15 20C18 18 22 20 21 24C20 27 15 27 14 24Z"/></symbol>
+  <symbol id="wachs-4" viewBox="0 0 100 100"><path d="M50 16C53 9 60 8 63 14C72 15 80 21 84 30C88 39 86 48 86 55C86 66 80 76 70 82C62 87 53 86 45 87C40 92 32 94 30 88C22 84 16 77 14 68C11 58 13 48 15 40C18 29 27 20 38 17C42 16 46 17 50 16Z"/></symbol>
+  <symbol id="wachs-5" viewBox="0 0 100 100"><path d="M47 12C56 13 60 10 67 14C75 18 82 22 85 31C88 39 85 44 87 51C89 59 86 67 81 73C76 79 76 85 68 87C60 89 54 86 46 88C38 90 30 85 24 79C18 73 13 68 13 59C13 52 10 46 13 39C16 31 20 24 28 18C34 14 40 11 47 12Z"/><path d="M90 30C92 29 94 31 93 33C92 34 90 34 90 32Z"/></symbol>
+</defs></svg>
+{%- endmacro %}
+
+{% macro schnee(count=22) -%}
+<div class="schnee" aria-hidden="true">{% for i in range(count) %}<i style="--x:{{ (i * 53) % 100 }}%;--d:{{ 8 + (i * 7) % 6 }}s;--o:-{{ (i * 5) % 12 }}s"></i>{% endfor %}</div>
+{%- endmacro %}

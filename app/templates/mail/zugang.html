@@ -1,0 +1,9 @@
+{% extends "mail/_base.html" %}{% from "mail/_base.html" import knopf %}
+{% block body %}
+<p style="margin:0 0 12px">Hallo,</p>
+<p style="margin:0 0 4px">hier ist dein persönlicher Schlüssel zum Familien-Adventskalender. Ein Tipp genügt, und du bist drin:</p>
+{{ knopf(login_url, "Zum Adventskalender") }}
+<p style="margin:0 0 12px">Der Link gilt bis zum {{ valid_until }} und beliebig oft.<br>Aufnehmen kannst du bis zum {{ deadline }}.</p>
+<p style="margin:16px 0 0;white-space:pre-line">{{ gruss }}</p>
+<p style="margin:18px 0 0;font-size:12px;color:#6b5b48;word-break:break-all">Falls der Knopf nicht geht: {{ login_url }}</p>
+{% endblock %}

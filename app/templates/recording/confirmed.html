@@ -1,0 +1,28 @@
+{% extends "recording/_base.html" %}
+{% from "_advent.html" import siegel, schnee %}
+{% block title %}Angekommen{% endblock %}
+{% block content %}
+{{ schnee() }}
+<div class="center-card">
+  {{ siegel(person.display_name, (beitrag.id if beitrag else none)|siegel_kontur, 120, stamp=True) }}
+  {% if auftrag %}
+  <h2>Angekommen</h2>
+  <p class="lead">„{{ chapter_title }}“ liegt jetzt bei {{ admin.dat }} zur Freigabe. Danke dir{% if kind %}, das wird {{ kind }} freuen{% endif %}.</p>
+  {% else %}
+  <h2>Deine Nachricht ist angekommen</h2>
+  <p class="lead">„{{ chapter_title }}“ liegt jetzt bei {{ admin.dat }}. Danke dir.</p>
+  {% endif %}
+
+  <div class="btn-stack">
+  {% if next_auftrag %}
+    {% set next_title = next_auftrag.title or "Eigene Geschichte" %}
+    <p class="meta">Du hast noch eine Geschichte: <strong>{{ next_title }}</strong>.</p>
+    <a class="btn btn-primary btn-block" href="/record/auftrag/{{ next_auftrag.id }}">Weiter zu „{{ next_title }}“</a>
+    <a class="btn btn-ghost btn-block" href="/archiv">Später, ins Archiv</a>
+  {% else %}
+    <a class="btn btn-primary btn-block" href="/record/campaign">Zu deinen Geschichten</a>
+    <a class="btn btn-secondary btn-block" href="/archiv">Ins Archiv</a>
+  {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Vorlesezeit</title>
+  <rect width="64" height="64" rx="14" fill="#c67139"/>
+  <path d="M32 4.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" fill="#f9f4ed"/>
+  <path d="M30.5 27.5C24 23 17.5 22 9.5 24.5v28c8-2.5 14.5-1.5 21 3z" fill="#f9f4ed"/>
+  <path d="M33.5 27.5C40 23 46.5 22 54.5 24.5v28c-8-2.5-14.5-1.5-21 3z" fill="#f5ead8"/>
+  <path d="M15 31c4-1 8-.5 11 1M15 37c4-1 8-.5 11 1M15 43c4-1 8-.5 11 1M38 32c3-1.5 7-2 11-1M38 38c3-1.5 7-2 11-1M38 44c3-1.5 7-2 11-1" stroke="#dcd3c4" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+</svg>

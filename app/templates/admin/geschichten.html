@@ -1,0 +1,95 @@
+{% extends "admin/_base.html" %}
+{% block title %}Geschichten{% endblock %}
+{% macro person_select(current_id, disabled=False) %}
+<div class="field"><label for="person_id">Wer liest vor</label>
+  <select class="input" id="person_id" name="person_id"{% if disabled %} disabled{% endif %}>
+    {% for person in persons %}<option value="{{ person.id }}"{% if person.id == current_id %} selected{% endif %}>{{ person.display_name or person.email }}{% if person.display_name %} ({{ person.email }}){% endif %}</option>
+    {% endfor %}<option value=""{% if current_id is none %} selected{% endif %}>noch niemand</option>
+  </select>
+  {% if disabled %}<input type="hidden" name="person_id" value="{{ current_id if current_id is not none else '' }}">{% endif %}</div>
+{% endmacro %}
+{% macro text_fields(title, text) %}
+<div class="field"><label for="title">Titel des Vorschlags (optional)</label><input class="input" id="title" name="title" value="{{ title or '' }}"></div>
+<div class="field"><label for="vorlesetext">Vorlesetext (optional, erscheint während der Aufnahme auf dem Handy)</label><textarea class="input" id="vorlesetext" name="vorlesetext" placeholder="Ohne Text nimmt die Person eine eigene Geschichte auf.">{{ text or '' }}</textarea></div>
+{% endmacro %}
+{% block content %}
+{% include "admin/_scope.html" %}
+{% set sel_auftrag = view.auftrag if view else none %}
+<div class="split">
+  <div>
+    <h3>{{ campaign.name }}</h3>
+    <p class="meta">Ein Tag trägt höchstens einen Auftrag. Titel und Vorlesetext sind optional.</p>
+    <div class="rec-list">
+      {% for row in rows %}
+      {% set sel = (selected_slot and row.slot.id == selected_slot.id) or (sel_auftrag and row.auftrag and row.auftrag.id == sel_auftrag.id) %}
+      <a class="rec-row{% if sel %} sel{% endif %}{% if not row.auftrag %} free{% endif %}" href="/admin/geschichten?slot_id={{ row.slot.id }}"{% if sel %} aria-current="true"{% endif %}><span class="day-badge">{{ row.slot.day }}</span><div><div class="n">{{ row.title }}</div><div class="meta">{{ row.meta }}</div></div>{% if row.tag %}<span class="{{ row.tag[1] }}">{{ row.tag[0] }}</span>{% endif %}</a>
+      {% endfor %}
+    </div>
+    <h3 class="section">Ohne Kalendertag</h3>
+    <p class="meta">Entwürfe sieht die Person nicht. Sie lösen keine Erinnerung aus.</p>
+    <div class="rec-list">
+      {% for draft in drafts %}
+      {% set sel = sel_auftrag and draft.id == sel_auftrag.id %}
+      <a class="rec-row{% if sel %} sel{% endif %}" href="/admin/geschichten?auftrag_id={{ draft.id }}"{% if sel %} aria-current="true"{% endif %}><span class="day-badge">–</span><div><div class="n">{{ draft.title or "(ohne Titel)" }}</div><div class="meta">{{ person_name(draft.person) or "noch nicht vergeben" }}</div></div><span class="tag tag-neutral">Entwurf</span></a>
+      {% else %}<p class="meta">Keine Entwürfe.</p>
+      {% endfor %}
+    </div>
+    <div class="btn-row-left" style="margin-top:var(--space-3)"><a class="btn btn-secondary btn-inline" href="/admin/geschichten?neu=1">Neuer Auftrag</a></div>
+  </div>
+
+  {% if view %}
+  {% set auftrag = view.auftrag %}
+  <form class="panel roomy" id="auftrag-form" method="post" action="/admin/auftraege/{{ auftrag.id }}">
+    <div><div class="panel-kicker">Auftrag</div><h2 class="panel-heading">{{ auftrag.title or "(ohne Titel)" }}</h2>
+      {% if not view.days %}<span class="tag tag-neutral">Entwurf</span>{% elif auftrag.person_id is none %}<span class="tag tag-outline">noch nicht vergeben</span>{% endif %}</div>
+    {% if view.lock %}
+    <div class="lock-note"><strong>{{ view.lock.campaign.name }} · Tag {{ view.lock.day }} ist schon {{ "ausgeliefert" if view.lock_delivered else "fest" }}.</strong> Neuvergabe an eine andere Person, Ablehnen, Rücknahme und Löschen sind deshalb gesperrt. Titel und Vorlesetext kannst du weiter ändern, weitere Kalendertage hinzufügen.</div>
+    {% endif %}
+    {% if not view.days %}<p class="meta">{{ person_name(auftrag.person) or "Die Person" }} sieht diesen Auftrag erst, wenn er an einem Kalendertag liegt. Bis dahin keine Erinnerung und kein Einladungshinweis.</p>{% endif %}
+    {{ person_select(auftrag.person_id, disabled=view.lock is not none) }}
+    {{ text_fields(auftrag.title, auftrag.vorlesetext) }}
+    <div class="field"><span class="meta">Kalendertage</span>
+      {% if view.days %}
+      <ul class="day-list">
+        {% for day in view.days %}
+        <li class="day-item{% if day.fixed %} fixed{% endif %}"><span class="cal-name">{{ day.slot.campaign.name }}</span><span>Tag {{ day.slot.day }}</span>{% if day.delivered %}<span class="tag tag-strong push-right">ausgeliefert</span>{% elif day.fixed %}<span class="tag tag-neutral push-right">fest: Vorabend gelaufen</span>{% endif %}{% if not day.fixed %}<button type="submit" class="btn btn-ghost{% if not day.delivered %} push-right{% endif %}" form="tag-entfernen-{{ day.slot.id }}">Entfernen</button>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="empty" style="margin:6px 0 0">Noch kein Kalendertag.</p>{% endif %}
+    </div>
+    {% if view.add_groups %}
+    <div class="add-day">
+      <div class="field"><label for="add-slot">Weiterer Kalendertag</label>
+        <select class="input" id="add-slot" name="slot_id" form="tag-hinzufuegen">
+          {% for name, slots in view.add_groups %}<optgroup label="{{ name }}">{% for s in slots %}<option value="{{ s.id }}">{{ name }} · Tag {{ s.day }}</option>{% endfor %}</optgroup>
+          {% endfor %}
+        </select></div>
+      <button type="submit" class="btn btn-secondary btn-inline" form="tag-hinzufuegen">Hinzufügen</button>
+    </div>
+    <p class="meta">Die Auswahl bietet nur Kalender an, in denen der Auftrag noch nicht liegt, und nur freie Tage. Die Person nimmt einmal auf, die Aufnahme gilt an jedem dieser Tage.</p>
+    {% else %}
+    <p class="meta">Kein freier Tag in einem weiteren Kalender.</p>
+    {% endif %}
+    <div class="btn-row-left"><button type="submit" class="btn btn-primary btn-inline">Speichern</button>{% if view.active_beitrag %}<a class="btn btn-ghost push-right" href="/admin/aufnahmen?beitrag_id={{ view.active_beitrag.id }}">Aufnahme dazu ansehen</a>{% endif %}</div>
+  </form>
+  {% for day in view.days if not day.fixed %}<form id="tag-entfernen-{{ day.slot.id }}" method="post" action="/admin/auftraege/{{ auftrag.id }}/tage/{{ day.slot.id }}/entfernen" hidden></form>{% endfor %}
+  <form id="tag-hinzufuegen" method="post" action="/admin/auftraege/{{ auftrag.id }}/tage" hidden></form>
+  {% elif new %}
+  <form class="panel roomy" method="post" action="/admin/auftraege">
+    <div><div class="panel-kicker">Neuer Auftrag</div><h2 class="panel-heading">Neuer Auftrag</h2></div>
+    {{ person_select(none) }}
+    {{ text_fields(none, none) }}
+    <p class="meta">Ohne Kalendertag bleibt der Auftrag ein Entwurf. Kalendertage fügst du nach dem Speichern hinzu.</p>
+    <div class="btn-row-left"><button type="submit" class="btn btn-primary btn-inline">Speichern</button></div>
+  </form>
+  {% elif selected_slot %}
+  <form class="panel roomy" method="post" action="/admin/geschichten/{{ selected_slot.id }}">
+    <div><div class="panel-kicker">Türchen {{ selected_slot.day }} · {{ selected_slot.day }}. Dezember · {{ selected_slot.campaign.name }}</div><h2 class="panel-heading">frei</h2></div>
+    <p class="meta">Noch kein Auftrag an diesem Tag. Die erste Angabe legt ihn an.</p>
+    {{ person_select(none) }}
+    {{ text_fields(none, none) }}
+    <div class="btn-row-left"><button type="submit" class="btn btn-primary btn-inline">Auftrag anlegen</button></div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

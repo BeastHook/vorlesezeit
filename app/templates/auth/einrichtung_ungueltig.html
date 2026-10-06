@@ -1,0 +1,9 @@
+{% extends "auth/_base.html" %}
+{% block title %}Link ungültig{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <span class="badge warn">!</span>
+  <h2>Dieser Einrichtungslink ist ungültig</h2>
+  <p>Er ist abgelaufen, wurde schon verwendet oder durch einen neueren ersetzt. Einen neuen Link schreibt die App bei ihrem nächsten Start ins Log, solange kein funktionierender Mailzugang eingerichtet ist.</p>
+</div>
+{% endblock %}

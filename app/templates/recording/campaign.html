@@ -1,0 +1,39 @@
+{% extends "recording/_base.html" %}
+{% from "_advent.html" import tuerchen %}
+{% block title %}Deine Geschichten{% endblock %}
+{% block page_class %} page-wand{% endblock %}
+{% block content %}
+<h2>Deine Geschichten</h2>
+{% if overview %}
+<p class="lead">{{ admin.Nom }} hat sie für dich ausgesucht.</p>
+{% else %}
+<p class="empty">{{ admin.Nom }} hat dir noch keine Geschichte gegeben.</p>
+{% endif %}
+<ul class="row-list">
+{% for row in overview %}
+  <li class="row-item row-story">
+    {% set zustand = {"offen": "fuge", "freigegeben": "offen"}.get(row.status, "spalt") %}
+    {{ tuerchen(zustand, ornament=row.auftrag.id|ornament_name, vt="orn-%d"|format(row.auftrag.id), flicker=row.status != 'freigegeben') }}
+    <div class="row-story-text">
+    <div class="row-title">{{ row.auftrag.title or "Eigene Geschichte" }}</div>
+    {% if row.auftrag.vorlesetext %}
+    <p class="row-excerpt">{{ row.auftrag.vorlesetext }}</p>
+    {% else %}
+    <p class="row-excerpt">Ohne Vorlesetext: {{ admin.nom }} freut sich über eine Geschichte deiner Wahl.</p>
+    {% endif %}
+    </div>
+    {% if row.status == 'offen' %}
+    <span class="row-due">Aufnehmen bis {{ deadline_label }}</span>
+    <span class="tag">noch offen</span>
+    <a class="btn btn-primary btn-block" href="/record/auftrag/{{ row.auftrag.id }}" data-tuerchen-open>Aufnehmen</a>
+    {% elif row.status == 'freigegeben' %}
+    <span class="tag tag-accent-2">freigegeben, kommt auf den Tonie</span>
+    <a class="btn btn-secondary btn-block" href="/archiv">Im Archiv anhören</a>
+    {% else %}
+    <span class="tag tag-neutral">eingereicht, {{ admin.nom }} gibt sie frei</span>
+    <a class="btn btn-secondary btn-block" href="/record/auftrag/{{ row.auftrag.id }}">Neu aufnehmen</a>
+    {% endif %}
+  </li>
+{% endfor %}
+</ul>
+{% endblock %}

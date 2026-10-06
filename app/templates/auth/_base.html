@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Vorlesezeit{% endblock %} · Vorlesezeit</title>
+<link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+</head>
+<body class="bereich-familie">
+{% from "_advent.html" import siegel_defs %}{{ siegel_defs() }}
+<div class="topbar">
+  <div class="brand"><img class="brand-mark" src="/static/ornaments/kerze-marke.svg" alt="" width="22" height="22">Vorlesezeit</div>
+</div>
+<main class="page">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,0 +1,108 @@
+# Vorlesezeit für befreundete Organisatoren (One-Klick-Setup, Spec 2026-10-04).
+# Der Installer legt diese Datei mit einer .env daneben ab; von Hand nicht
+# nötig. Feste Versionen, nie "latest": ein Update ändert nur
+# VORLESEZEIT_IMAGE in der .env. Kein Port nach außen, kein Docker-Socket:
+# erreichbar nur über den Cloudflare Tunnel.
+name: vorlesezeit
+
+x-storage-env: &storage-env
+  STORAGE_ENDPOINT_URL: http://minio:9000
+  STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt}
+  STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt}
+  STORAGE_BUCKET: vorlesezeit
+  STORAGE_REGION: us-east-1
+
+services:
+  minio:
+    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY fehlt}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY fehlt}
+    volumes:
+      - minio-data:/data
+
+  createbuckets:
+    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      - minio
+    environment:
+      <<: *storage-env
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 \"$$STORAGE_ACCESS_KEY\" \"$$STORAGE_SECRET_KEY\" >/dev/null; do
+        echo 'warte auf minio...'; sleep 1;
+      done;
+      mc mb --ignore-existing \"local/$$STORAGE_BUCKET\";
+      "
+
+  app:
+    image: ${VORLESEZEIT_IMAGE:?VORLESEZEIT_IMAGE fehlt}
+    restart: unless-stopped
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+    environment:
+      <<: *storage-env
+      APP_TIMEZONE: Europe/Berlin
+      DATABASE_PATH: /data/vorlesezeit.db
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:?SESSION_SECRET_KEY fehlt}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL fehlt}
+      ADMIN_DISPLAY_NAME: ${ADMIN_DISPLAY_NAME:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTPUSER: ${SMTPUSER:-}
+      SMTPPW: ${SMTPPW:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      CREDENTIALS_KEY: ${CREDENTIALS_KEY:-}
+      TRIGGER_SECRET: ${TRIGGER_SECRET:?TRIGGER_SECRET fehlt}
+      BACKUP_MARKER_PATH: /backup-marker/last-success
+    volumes:
+      - db-data:/data
+      - backup-marker:/backup-marker:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/status', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN fehlt}
+
+  scheduler:
+    image: ${VORLESEZEIT_IMAGE:?VORLESEZEIT_IMAGE fehlt}
+    command: ["python", "deploy/scheduler/scheduler.py"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      TRIGGER_SECRET: ${TRIGGER_SECRET:?TRIGGER_SECRET fehlt}
+
+  backup:
+    image: ${VORLESEZEIT_IMAGE:?VORLESEZEIT_IMAGE fehlt}
+    command: ["python", "deploy/backup/backup.py"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      <<: *storage-env
+      DATABASE_PATH: /data/vorlesezeit.db
+      BACKUP_TARGET_DIR: /backup
+      BACKUP_MARKER_PATH: /backup-marker/last-success
+    volumes:
+      - db-data:/data
+      - backup-marker:/backup-marker
+      - ${BACKUP_TARGET_PATH:?BACKUP_TARGET_PATH fehlt}:/backup
+
+volumes:
+  db-data:
+  minio-data:
+  backup-marker:

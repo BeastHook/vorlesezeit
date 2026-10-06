@@ -1,0 +1,22 @@
+{% extends "admin/_base.html" %}
+{% set name = konto.label or mask_email(konto.username) %}
+{% block title %}Konto löschen{% endblock %}
+{% block content %}
+<div class="panel warm panel-narrow">
+  <div class="panel-kicker">Konto {{ name }} löschen?</div>
+  {% if blocker %}
+  <div class="lock-note"><strong>{{ blocker }}</strong></div>
+  <div class="btn-row-left"><a class="btn btn-ghost" href="/admin/setup#s-konten">Zurück</a></div>
+  {% else %}
+  <p>Die App meldet sich danach nie mehr mit diesem Konto an. Auf den Tonies ändert sich nichts.</p>
+  {% if tonies %}
+  <p>Aus der Liste verschwinden: {% for t in tonies %}{{ t.name or short_id(t.tonie_id) }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+  <p class="meta">Gehört ein Tonie auch zu einem anderen Konto, holt „Tonies neu einlesen“ ihn dort zurück.</p>
+  {% endif %}
+  <form method="post" action="/admin/setup/konten/{{ konto.id }}/loeschen" class="btn-row-left">
+    <button type="submit" class="btn btn-danger">Konto löschen</button>
+    <a class="btn btn-ghost" href="/admin/setup#s-konten">Abbrechen</a>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

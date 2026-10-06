@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Admin{% endblock %} · Vorlesezeit</title>
+<link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+</head>
+<body class="bereich-admin">
+{% from "_advent.html" import siegel_defs %}{{ siegel_defs() }}
+<div class="topbar">
+  <div class="brand"><img class="brand-mark" src="/static/ornaments/kerze-marke.svg" alt="" width="22" height="22">Vorlesezeit</div>
+  {% if switcher %}
+  <form class="tonie-switch" method="post" action="/admin/tonie">
+    <label for="tonie-switch">Tonie</label>
+    <input type="hidden" name="zurueck" value="/admin/{{ tab }}">
+    <select class="input" id="tonie-switch" name="auswahl" onchange="this.form.submit()">
+      {% for group, options in switcher.groups %}
+      <optgroup label="{{ group }}">
+        {% for value, label in options %}<option value="{{ value }}"{% if value == switcher.value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit" class="btn btn-secondary">Wechseln</button></noscript>
+  </form>
+  {% endif %}
+  <a class="role-link" href="/">Zur Familienansicht</a>
+</div>
+<main class="admin-page">
+{% if tab %}
+<nav class="admin-tabs">
+  {% for key, label in tabs %}
+  <a href="/admin/{{ key }}"{% if key == tab %} aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
+{% if flash %}<div class="flash {{ flash.kind }}" role="status" data-result="{{ flash.kind }}">{{ flash.message }}</div>{% endif %}
+{% block content %}{% endblock %}
+</main>
+<script src="/static/admin.js?v={{ asset_v }}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

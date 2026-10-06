@@ -1,0 +1,7 @@
+{{ greeting }}hinter Türchen {{ days }} fehlt noch deine Geschichte. Ein ruhiger Moment genügt, über diesen Link kommst du direkt zur Aufnahme:
+
+{{ login_url }}
+
+Danke, dass du{% if kind %} für {{ kind }}{% endif %} vorliest!
+
+{{ gruss }}

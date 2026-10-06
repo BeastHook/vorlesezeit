@@ -1,0 +1,51 @@
+{% extends "recording/_base.html" %}
+{% from "_advent.html" import siegel, tuerchen %}
+{% block title %}Familienarchiv{% endblock %}
+{% block page_class %} page-wand{% endblock %}
+{% block content %}
+<h2>Familienarchiv</h2>
+<p class="lead">Deine eigenen Aufnahmen hörst du sofort. Die Geschichten der anderen öffnen sich ab Mitternacht nach ihrem Tag im Kalender.</p>
+
+{% macro entry(e, own=False) %}
+  <li class="row-item">
+    <div class="row-head">
+      {% if own %}{{ siegel(e.beitrag.person.display_name, e.beitrag.id|siegel_kontur, 54) }}
+      {% elif e.day %}{{ tuerchen("offen", number=e.day, announce=False) }}{% endif %}
+      <div><div class="row-title">{{ e.title }}</div><div class="row-sub">{{ e.sub }}</div></div>
+    </div>
+    {% if e.tag %}<span class="{{ e.tag[1] }}">{{ e.tag[0] }}</span>{% endif %}
+    {% if e.playable %}<audio controls preload="none" src="/archiv/{{ e.beitrag.id }}/audio"></audio>{% endif %}
+    {% if e.rerecord_href %}<a class="btn btn-secondary btn-block" href="{{ e.rerecord_href }}">Neu aufnehmen</a>{% endif %}
+  </li>
+{% endmacro %}
+
+{% if archive.own %}
+<section class="section">
+  <h3>Deine Aufnahmen</h3>
+  <ul class="row-list">
+  {% for e in archive.own %}{{ entry(e, own=True) }}{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="section">
+  <h3>Aus der Familie</h3>
+  {% if archive.locked_day or archive.family %}
+  <ul class="row-list">
+    {% if archive.locked_day %}
+    <li class="row-item locked">
+      <div class="row-head">
+        {{ tuerchen("fuge", number=archive.locked_day, flicker=False, announce=False) }}
+        <div><div class="row-title">Noch verschlossen</div><div class="row-sub">öffnet sich am {{ archive.locked_day + 1 }}. Dezember</div></div>
+      </div>
+    </li>
+    {% endif %}
+    {% for e in archive.family %}{{ entry(e) }}{% endfor %}
+  </ul>
+  {% elif archive.first_opening %}
+  <p class="empty">Noch ist nichts offen. Die erste Geschichte öffnet sich am 2. Dezember.</p>
+  {% else %}
+  <p class="empty">Noch keine Geschichten aus der Familie.</p>
+  {% endif %}
+</section>
+{% endblock %}

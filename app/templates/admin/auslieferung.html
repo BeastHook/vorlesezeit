@@ -1,0 +1,130 @@
+{% extends "admin/_base.html" %}
+{% block title %}Auslieferung{% endblock %}
+{% block content %}
+{% if current_tonie %}
+<div class="scope-note solo"><span class="tag tag-neutral">{% if mirrored %}Nur {% endif %}{{ tonie_name }}</span><span>{% if mirrored %}{{ mirrored|join(", ") }} {{ "hat" if mirrored|length == 1 else "haben" }} einen eigenen Lauf, eigenen Platz und eigenen Verlauf.{% elif campaign %}Bespielt den Kalender {{ campaign.name }}.{% else %}Gehört zu keinem Kalender: nur der manuelle Lauf, kein täglicher Lauf und kein Ersatzbeitrag.{% endif %}</span></div>
+{% else %}
+<div class="panel muted" style="margin-bottom:var(--space-4)">
+  <div class="panel-kicker">Auslieferung</div>
+  <div class="panel-title">{% if campaign %}{{ campaign.name }} bespielt keinen Tonie{% else %}Kein Tonie gewählt{% endif %}</div>
+  <p>Ohne Tonie gibt es keinen täglichen Lauf, keinen Platz und keinen Verlauf. Tonies verknüpfst du und ordnest sie einem Kalender zu im Setup.</p>
+  <a class="btn btn-secondary btn-inline" href="/admin/setup">Zum Setup</a>
+</div>
+{% endif %}
+{% if current_tonie %}
+<div class="panel-grid">
+  {% if campaign %}
+  <form class="panel" method="post" action="/admin/auslieferung/jetzt">
+    <div class="panel-kicker">Nächster Lauf · täglich {{ delivery_time }} (aus den Einstellungen, R46)</div>
+    {% if next_day %}
+    <div class="panel-title">Türchen {{ next_day }}{% if next_title %} · {{ next_title }}{% endif %}</div>
+    <p>
+      {% if next_state %}{{ next_state.label[:1]|upper }}{{ next_state.label[1:] }}{% else %}Kein Türchen angelegt{% endif %}{% if next_person %}, gesprochen von {{ next_person.display_name or next_person.email }}{% endif %}.
+      Der Lauf tauscht das Kapitel der App an Platz 1 aus. Alles andere auf dem Tonie bleibt dahinter.
+    </p>
+    {% else %}
+    <div class="panel-title">Außerhalb des Advents</div>
+    <p>Heute Abend ist kein automatischer Lauf fällig.</p>
+    {% endif %}
+    <div class="field">
+      <label for="lauf-tag">Tag</label>
+      <select class="input" id="lauf-tag" name="day">
+        {% for d in range(1, 25) %}<option value="{{ d }}"{% if d == default_day %} selected{% endif %}>Tag {{ d }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="btn-row-left">
+      <button type="submit" class="btn btn-primary btn-inline" data-busy="Wird gestartet …" data-done="Gestartet ✓">Jetzt aufspielen</button>
+      <button type="submit" class="btn btn-secondary btn-inline" formaction="/admin/auslieferung/trockenlauf" data-busy="Wird gestartet …" data-done="Gestartet ✓">Trockenlauf</button>
+    </div>
+    <p class="meta">Der Trockenlauf prüft Anmeldung, Formatvorprüfung und Übertragung, nicht die Verarbeitung auf dem Tonie (R45).</p>
+  </form>
+
+  <form class="panel" method="post" action="/admin/campaign/replacement">
+    <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
+    <div class="panel-kicker">Ersatzbeitrag (R21) · {{ campaign.name }}</div>
+    <div class="panel-title">{% if replacement_label %}„{{ replacement_label }}"{% else %}keiner hinterlegt{% endif %}</div>
+    <p>Greift, wenn für den Folgetag nichts freigegeben ist oder die Verarbeitung den Tagesbeitrag verwirft.</p>
+    {% if deliverable %}
+    <div class="field">
+      <label for="ersatz">{% if replacement %}Tauschen gegen einen freigegebenen Beitrag{% else %}Freigegebenen Beitrag wählen{% endif %}</label>
+      <select class="input" id="ersatz" name="beitrag_id">
+        {% for b, label, _days in deliverable %}<option value="{{ b.id }}"{% if replacement and b.id == replacement.id %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-secondary btn-inline">Als Ersatzbeitrag setzen</button>
+    {% else %}
+    <p class="meta">Noch kein freigegebener Beitrag vorhanden.</p>
+    {% endif %}
+  </form>
+
+  {% endif %}
+  <div class="panel muted">
+    <div class="panel-kicker">Platz auf dem Tonie (R50)</div>
+    {% if space %}
+    <div class="panel-title" data-result="ok">Frei: {{ space.free_minutes }}</div>
+    <p>Bestand: {{ space.stock_count }} Kapitel, {{ space.stock_minutes }}</p>
+    {% if space.too_long %}
+    <p><strong>Diese Beiträge passen nicht hinein:</strong> {{ space.too_long|join(", ") }}</p>
+    {% else %}
+    <p>Alle freigegebenen Beiträge passen.</p>
+    {% endif %}
+    {% elif space_error %}
+    <p data-result="err">{{ space_error }}</p>
+    {% else %}
+    <p>Liest den Tonie und prüft alle freigegebenen Beiträge.</p>
+    {% endif %}
+    <a class="btn btn-secondary btn-inline" data-busy="Prüfung läuft …" data-done="Geprüft ✓" href="/admin/auslieferung?platz=1">Platz prüfen</a>
+  </div>
+</div>
+{% endif %}
+
+{% if manual_targets %}
+<form class="panel" method="post" action="/admin/auslieferung/manuell" style="margin-bottom:var(--space-6)">
+  <div class="panel-kicker">Manueller Lauf mit mehreren Beiträgen (R20, R42)</div>
+  <p class="meta">Ankreuzen und Reihenfolge festlegen. Die Kapitel kommen vor den Bestand. Der nächste Vorabend-Lauf tauscht sie wieder gegen die Geschichte des Tages.</p>
+  {% if deliverable %}
+  <div class="field">
+    <label for="ziel-tonie">Ziel-Tonie</label>
+    <select class="input" id="ziel-tonie" name="tonie">
+      {% for t, label in manual_targets %}<option value="{{ t.id }}"{% if current_tonie and t.id == current_tonie.id %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th></th><th>Reihenfolge</th><th>Beitrag</th><th>Kalendertage</th></tr></thead>
+    <tbody>
+    {% for b, label, days in deliverable %}
+      <tr>
+        <td><input type="checkbox" class="checkbox" name="beitrag_id" value="{{ b.id }}" aria-label="{{ label }} auswählen"></td>
+        <td><input class="input" style="width:80px" type="number" min="1" name="order_{{ b.id }}" aria-label="Reihenfolge"></td>
+        <td>{{ label }}</td>
+        <td>{{ days }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <button type="submit" class="btn btn-secondary btn-inline" data-busy="Wird gestartet …" data-done="Gestartet ✓">Ausgewählte jetzt aufspielen</button>
+  {% else %}
+  <p>Noch kein freigegebener Beitrag vorhanden.</p>
+  {% endif %}
+</form>
+{% endif %}
+
+{% if current_tonie %}
+<h3>Verlauf</h3>
+<div class="panel table-wrap"{% if history|selectattr("running")|first %} data-live-runs="/admin/auslieferung/status"{% endif %}>
+  {% if history %}
+  {% if history|selectattr("running")|first %}<p class="live-hint" data-live-hint><span class="live-dot"></span>Aktualisiert sich automatisch</p>{% endif %}
+  <table class="table">
+    <thead><tr><th>Zeit</th><th>Lauf</th><th>Inhalt</th><th>Ausgang</th></tr></thead>
+    <tbody>
+    {% for row in history %}
+      <tr data-run-id="{{ row.id }}"{% if row.running %} data-running{% endif %}><td>{{ row.time }}</td><td>{{ row.label }}</td><td data-cell="content">{{ row.content }}</td><td><span class="{{ row.outcome_class }}" data-cell="outcome">{{ row.outcome_text }}</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="meta">Noch kein Lauf.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

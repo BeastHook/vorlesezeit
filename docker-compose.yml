@@ -1,0 +1,70 @@
+# Lokaler Beweis fuer U1: App + S3-kompatibler Objektspeicher (MinIO).
+# Ersetzt keinen echten Zielort -- siehe U1-Plan, Abschnitt "Zielort".
+name: vorlesezeit
+services:
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    # KTD17: der Browser braucht den Speicher nicht mehr (Audio laeuft durch
+    # die App). Nur noch auf der Loopback-Schnittstelle, fuer die Tests
+    # (tests/test_storage.py) und die Konsole vom Entwicklerrechner aus.
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: vorlesezeit
+      MINIO_ROOT_PASSWORD: vorlesezeit-dev-secret
+    volumes:
+      - minio-data:/data
+
+  createbuckets:
+    image: quay.io/minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 vorlesezeit vorlesezeit-dev-secret; do
+        echo 'warte auf minio...'; sleep 1;
+      done;
+      mc mb --ignore-existing local/vorlesezeit-test;
+      exit 0;
+      "
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_TIMEZONE: Europe/Berlin
+      STORAGE_ENDPOINT_URL: http://minio:9000
+      STORAGE_ACCESS_KEY: vorlesezeit
+      STORAGE_SECRET_KEY: vorlesezeit-dev-secret
+      STORAGE_BUCKET: vorlesezeit-test
+      STORAGE_REGION: us-east-1
+      # SQLite-Datei in einem eingebundenen Verzeichnis (KTD12) -- siehe
+      # das db-data-Volume unten.
+      DATABASE_PATH: /data/vorlesezeit.db
+      SESSION_SECRET_KEY: vorlesezeit-dev-session-secret
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      MAGIC_LINK_VALID_UNTIL: "2026-12-31"
+      SMTP_HOST: smtp-relay.brevo.com
+      SMTP_PORT: "587"
+      SMTPUSER: ${SMTPUSER:-}
+      SMTPPW: ${SMTPPW:-}
+      SMTP_FROM_ADDRESS: ${SMTPUSER:-}
+      TONIE_USERNAME: ${TONIE_USERNAME:-}
+      TONIE_PASSWORD: ${TONIE_PASSWORD:-}
+      TONIE_DELIVERY_TIME: ${TONIE_DELIVERY_TIME:-20:00}
+      TRIGGER_SECRET: ${TRIGGER_SECRET:-}
+      # Mehrkalender U3 (KTD4): Fernet-Schluessel fuer die Passwoerter in der
+      # DB. SMTP-/tonies-/Terminwerte oben sind nur Startwerte (R28), einmal
+      # uebernommen, danach pflegt sie das Setup.
+      CREDENTIALS_KEY: ${CREDENTIALS_KEY:-}
+    volumes:
+      - db-data:/data
+    depends_on:
+      - minio
+
+volumes:
+  minio-data:
+  db-data:

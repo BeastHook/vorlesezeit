@@ -1,0 +1,18 @@
+{% extends "auth/_base.html" %}
+{% from "_advent.html" import schnee, ornament %}
+{% block title %}Anmelden{% endblock %}
+{% block content %}
+{{ schnee() }}
+<div class="auth-card">
+  {{ ornament("stern", 46) }}
+  <h2>Anmelden</h2>
+  <p>Gib die Mailadresse ein, unter der du eingeladen wurdest. Wir schicken dir einen Link, ein Passwort gibt es nicht.</p>
+  <form method="post" action="/login">
+    <div class="field">
+      <label for="email">Mailadresse</label>
+      <input class="input" type="email" id="email" name="email" required autocomplete="email" placeholder="name@beispiel.de">
+    </div>
+    <button type="submit" class="btn btn-primary">Link schicken</button>
+  </form>
+</div>
+{% endblock %}

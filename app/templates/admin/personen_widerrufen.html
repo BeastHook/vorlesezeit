@@ -1,0 +1,15 @@
+{% extends "admin/_base.html" %}
+{% block title %}Zugang widerrufen{% endblock %}
+{% block content %}
+{% set name = person.display_name or person.email %}
+<div class="panel panel-narrow">
+  <div class="panel-kicker">Zugang widerrufen</div>
+  <h3>{{ name }}</h3>
+  <p class="meta">{{ person.email }}</p>
+  <p>Alle ausstehenden Links und laufenden Sitzungen von {{ name }} werden sofort und auf einmal ungültig. Die Adresse bleibt angelegt. {{ name }} kann sich später über die Anmeldeseite einen neuen Link schicken lassen.</p>
+  <form method="post" action="/admin/personen/{{ person.id }}/widerrufen" class="btn-row-left">
+    <button type="submit" class="btn btn-danger btn-inline">Zugang widerrufen</button>
+    <a class="btn btn-ghost btn-inline" href="/admin/personen">Abbrechen</a>
+  </form>
+</div>
+{% endblock %}

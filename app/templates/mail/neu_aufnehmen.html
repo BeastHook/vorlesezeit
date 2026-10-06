@@ -1,0 +1,10 @@
+{% extends "mail/_base.html" %}{% from "mail/_base.html" import knopf %}
+{% block body %}
+<p style="margin:0 0 12px">{{ greeting }}</p>
+<p style="margin:0 0 4px">{{ what }} passt so leider noch nicht ganz.</p>
+{% if comment %}<p style="margin:12px 0;border-left:3px solid #b8892f;background:#f7efe1;padding:6px 12px;font-style:italic">{{ comment }}</p>{% endif %}
+<p style="margin:0 0 4px">Magst du sie noch einmal aufnehmen? Lass dir ruhig Zeit. Über diesen Link kommst du direkt zur Aufnahme:</p>
+{{ knopf(login_url, "Noch einmal aufnehmen") }}
+<p style="margin:16px 0 0;white-space:pre-line">{{ gruss }}</p>
+<p style="margin:18px 0 0;font-size:12px;color:#6b5b48;word-break:break-all">Falls der Knopf nicht geht: {{ login_url }}</p>
+{% endblock %}

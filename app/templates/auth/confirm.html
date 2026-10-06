@@ -1,0 +1,19 @@
+{% extends "auth/_base.html" %}
+{% block title %}Anmelden{% endblock %}
+{% block content %}
+<div class="auth-card">
+  {% if person.display_name %}
+  <span class="avatar">{{ person.display_name[0] | upper }}</span>
+  <h2>Willkommen, {{ person.display_name }}</h2>
+  {% else %}
+  <h2>Willkommen</h2>
+  {% endif %}
+  <p>Du bist beim Adventskalender {% if kind %}für {{ kind }}{% else %}der Familie{% endif %} dabei. Tippe auf den Knopf, dann bist du angemeldet. Ein Passwort brauchst du nicht.</p>
+  <form method="post" action="/login/confirm">
+    <input type="hidden" name="token" value="{{ token }}">
+    {% if next != "/" %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <button type="submit" class="btn btn-primary btn-block">Anmelden und vorlesen</button>
+  </form>
+  <p class="meta">Der Link gilt bis zum {{ valid_until }} und beliebig oft.</p>
+</div>
+{% endblock %}
