@@ -11,15 +11,18 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Header
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Header, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import settings
@@ -41,6 +44,7 @@ from app.herkunft import HerkunftMiddleware
 from app.models import Person
 from app.recording.views import router as recording_router
 from app.storage import ObjectStorage
+from app.templating import templates
 
 # KTD19: aelter als das gilt die Sicherung als ausgefallen.
 BACKUP_MAX_AGE = timedelta(hours=36)
@@ -139,6 +143,7 @@ def create_app() -> FastAPI:
         app.state.config = config
         app.state.storage = ObjectStorage(config)
         app.state.session_factory = session_factory
+        app.state.started_at = time.monotonic()
         yield
 
     app = FastAPI(title="Vorlesezeit", lifespan=lifespan)
@@ -164,6 +169,14 @@ def create_app() -> FastAPI:
     app.include_router(archive_router)
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
+    @app.exception_handler(StarletteHTTPException)
+    async def not_found_page(request: Request, exc: StarletteHTTPException):
+        # Nur Browser bekommen die deutsche Seite; JSON-, Audio- und
+        # Testaufrufe sowie alle anderen Status bleiben wie bisher.
+        if exc.status_code == 404 and "text/html" in request.headers.get("accept", ""):
+            return templates.TemplateResponse(request, "fehler_404.html", {}, status_code=404)
+        return await http_exception_handler(request, exc)
+
     @app.get("/status")
     def status() -> dict[str, object]:
         # R21: nur die Namen der neu einzugebenden Zugangsdaten, nie Werte.
@@ -174,7 +187,12 @@ def create_app() -> FastAPI:
             "version": __version__,
             "timezone": app.state.config.timezone,
             "neu_eingeben": neu_eingeben,
+            "uptime_seconds": int(time.monotonic() - app.state.started_at),
         }
+
+    @app.get("/robots.txt", response_class=PlainTextResponse)
+    def robots_txt() -> str:
+        return "User-agent: *\nDisallow: /\n"
 
     @app.get("/backup/check")
     def backup_check(x_trigger_secret: str = Header(default="")) -> JSONResponse:

@@ -31,6 +31,32 @@ def test_status_reports_version_and_timezone(configured_env):
     assert "version" in body
 
 
+def test_status_reports_uptime_right_after_start(configured_env):
+    with TestClient(create_app()) as client:
+        body = client.get("/status").json()
+
+    assert isinstance(body["uptime_seconds"], int)
+    assert body["uptime_seconds"] >= 0
+
+
+def test_status_uptime_truncates_full_seconds(configured_env):
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.started_at -= 42.5
+        body = client.get("/status").json()
+
+    assert body["uptime_seconds"] == 42
+
+
+def test_robots_txt_disallows_all_crawlers(configured_env):
+    with TestClient(create_app()) as client:
+        response = client.get("/robots.txt")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert response.text == "User-agent: *\nDisallow: /\n"
+
+
 def test_startup_aborts_when_required_env_var_missing(configured_env, monkeypatch):
     monkeypatch.delenv("STORAGE_BUCKET")
 

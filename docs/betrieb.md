@@ -269,6 +269,13 @@ Kurzform: `DC="docker compose -f docker-compose.heimserver.yml --env-file .env.h
 | Stoppen (Daten bleiben) | `$DC stop` bzw. `$DC down` |
 | Konfiguration prüfen | `$DC config -q` (nur Exit-Code, gibt keine Werte aus) |
 
+Für ein Update ohne Schemaänderung gibt es `deploy/heimserver.sh` (nach
+`git pull`): `pre` bricht ab, wenn nicht sauberes `main` ausgecheckt ist,
+und löst eine Sicherung aus; `up` baut und startet neu; `post` zeigt Zustand,
+`/status` und Fehler oder einen Einrichtungslink im Log der letzten 5 Minuten.
+Mit Schemaänderung vorher zusätzlich die Migrationsprobe auf einer Kopie der
+Datenbank.
+
 **Umstellung auf die Mehrkalender-Version** (einmalig): vor dem ersten Start
 der neuen Version eine Sicherung auslösen (`$DC exec backup python
 deploy/backup/backup.py --once`, siehe unten) und `CREDENTIALS_KEY` eintragen.

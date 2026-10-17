@@ -10,6 +10,7 @@ laeuft separat und manuell.
 
 from __future__ import annotations
 
+import ssl
 from datetime import datetime
 from urllib.parse import parse_qs
 
@@ -23,6 +24,7 @@ from app.toniecloud.client import (
     API_BASE_URL,
     TOKEN_URL,
     KontoUnavailable,
+    LoginCertificateError,
     LoginRejectedError,
     LoginTimeoutError,
     TermsOfUseRequiredError,
@@ -170,6 +172,44 @@ def test_login_timeout_fails_after_fixed_cap():
 
     with pytest.raises(LoginTimeoutError):
         client._ensure_token()
+
+    script.assert_exhausted()
+
+
+def certificate_error() -> httpx.ConnectError:
+    """So wie httpx einen abgelehnten TLS-Aussteller meldet (Zscaler, 2026-10-03)."""
+    exc = httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+    exc.__cause__ = ssl.SSLCertVerificationError(
+        1, "certificate verify failed: unable to get local issuer certificate"
+    )
+    return exc
+
+
+def test_login_certificate_error_fails_immediately_and_names_proxy():
+    sleeps: list[float] = []
+    client, script = make_client(
+        [("POST", TOKEN_URL, certificate_error())],
+        sleep=sleeps.append,
+    )
+
+    with pytest.raises(LoginCertificateError) as excinfo:
+        client._ensure_token()
+
+    assert "Zertifikat" in str(excinfo.value)
+    assert "Zscaler" in str(excinfo.value)
+    assert sleeps == []
+    script.assert_exhausted()
+
+
+def test_login_connect_error_without_certificate_problem_still_retries():
+    client, script = make_client(
+        [
+            ("POST", TOKEN_URL, httpx.ConnectError("connection refused")),
+            ("POST", TOKEN_URL, token_response()),
+        ],
+    )
+
+    client._ensure_token()
 
     script.assert_exhausted()
 

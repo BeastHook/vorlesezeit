@@ -13,6 +13,7 @@ Referenz-Bibliothek.
 
 from __future__ import annotations
 
+import ssl
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -72,6 +73,27 @@ class LoginTimeoutError(TonieCloudError):
             f"Anmeldung nach {attempts} Versuchen wegen Zeitueberschreitung gescheitert"
         )
         self.attempts = attempts
+
+
+class LoginCertificateError(TonieCloudError):
+    """Das TLS-Zertifikat der Anmeldung wurde abgelehnt. Kein Retry: ein
+    Proxy mit TLS-Inspektion (Zscaler auf dem Heimserver-Mac, Known Pitfalls)
+    verschwindet nicht nach zwei Sekunden."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Anmeldung gescheitert: Zertifikat von login.tonies.com abgelehnt. "
+            "Firmen-Proxy (Zscaler) aktiv? Abschalten und den Lauf neu anstossen."
+        )
+
+
+def _is_certificate_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 class TermsOfUseRequiredError(TonieCloudError):
@@ -208,6 +230,8 @@ class TonieCloudClient:
                     timeout=LOGIN_TIMEOUT_SECONDS,
                 )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                if _is_certificate_error(exc):
+                    raise LoginCertificateError() from exc
                 last_timeout = exc
                 if attempt < LOGIN_MAX_ATTEMPTS:
                     self._sleep(LOGIN_RETRY_DELAY_SECONDS)

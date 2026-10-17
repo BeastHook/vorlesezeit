@@ -37,3 +37,4 @@ venv/
 *-handoff.zip
 
 .superpowers/
+/factory/jobs/
