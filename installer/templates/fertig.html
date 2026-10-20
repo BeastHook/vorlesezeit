@@ -1,0 +1,25 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf %}
+{% block title %}Fertig{% endblock %}
+{% block content %}
+{{ kopf(7, "Fertig") }}
+<h1 class="wz-q">Vorlesezeit läuft</h1>
+<p class="lead">Deine Familie findet den Kalender unter dieser Adresse:</p>
+<div class="copy-box"><span>https://{{ adresse }}</span><button type="button" data-kopieren="https://{{ adresse }}">Kopieren</button></div>
+<p class="wz-abstand">Dein Anmeldelink ist unterwegs an <strong>{{ admin }}</strong>. Damit richtest du in Vorlesezeit dein tonies-Konto und den Kalender ein.</p>
+<div class="panel warm wz-abstand">
+  <div class="panel-title">Notfallblatt</div>
+  {% if geladen %}
+  <p class="meta wz-ohne-rand">✓ Heruntergeladen: {{ datei }}</p>
+  <a class="btn btn-secondary btn-block" href="/notfallblatt" download="{{ datei }}">Noch einmal herunterladen</a>
+  {% else %}
+  <p class="wz-ohne-rand">Damit lässt sich Vorlesezeit nach einem Defekt wiederherstellen. Bewahre es getrennt von diesem Rechner auf, am besten ausgedruckt.</p>
+  <a class="btn btn-secondary btn-block" href="/notfallblatt" download="{{ datei }}">Notfallblatt herunterladen</a>
+  {% endif %}
+</div>
+<form method="post" action="/abschliessen">
+  <label class="wz-confirm wz-abstand"><input type="checkbox" class="checkbox" name="gespeichert" data-bestaetigen{% if fehler %} aria-invalid="true" aria-describedby="haken-err"{% endif %}><span>Ich habe das Notfallblatt gespeichert, nicht nur auf diesem Rechner.</span></label>
+  {% if fehler %}<p class="field-err" id="haken-err">{{ fehler }}</p>{% endif %}
+  <div class="wz-foot"><button type="submit" class="btn btn-primary btn-block" data-abschliessen>Abschließen</button></div>
+</form>
+{% endblock %}

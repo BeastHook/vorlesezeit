@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% block kopfzeilen %}{% endblock %}
+<title>{% block title %}Einrichtung{% endblock %} · Vorlesezeit</title>
+<link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/assistent/assistent.css?v={{ asset_v }}">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<script src="/assistent/assistent.js?v={{ asset_v }}" defer></script>
+</head>
+<body class="bereich-familie">
+<div class="topbar">
+  <div class="brand"><img class="brand-mark" src="/static/ornaments/kerze-marke.svg" alt="" width="22" height="22">Vorlesezeit</div>
+  <span class="meta">{% block bereich %}Einrichtung{% endblock %}</span>
+</div>
+<main class="page">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

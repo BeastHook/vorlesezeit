@@ -1,0 +1,24 @@
+{% extends "_wartung.html" %}
+{% from "_kopf.html" import aufgabe, technik, hauptknopf %}
+{% block title %}Anmeldelink{% endblock %}
+{% block content %}
+{{ aufgabe("Anmeldelink") }}
+{% if link %}
+<h1 class="wz-q">Dein Anmeldelink</h1>
+<div class="copy-box"><span class="wz-umbruch">{{ link }}</span><button type="button" data-kopieren="{{ link }}">Kopieren</button></div>
+<div class="wz-foot">
+  <a class="btn btn-primary btn-block" href="{{ link }}" target="_blank" rel="noopener">Im Browser öffnen</a>
+  <p class="note">Gilt einmal und bis {{ bis }}. Gib ihn nicht weiter, er öffnet den Admin-Bereich.</p>
+</div>
+{% elif meldung %}
+<h1 class="wz-q">Nicht mehr im Admin-Bereich?</h1>
+<div class="flash err wz-flash" role="alert">{{ meldung.satz }}</div>
+{% if meldung.technik %}{{ technik(meldung.technik) }}{% endif %}
+{{ hauptknopf(meldung.knopf) }}
+{% else %}
+<h1 class="wz-q">Nicht mehr im Admin-Bereich?</h1>
+<p class="lead">Hier bekommst du einen Link, der dich direkt als Admin anmeldet. Ganz ohne Mail.</p>
+<p class="meta">Der Link gilt einmal und 24 Stunden lang.</p>
+<form method="post" action="/wartung/anmeldelink"><div class="wz-foot"><button type="submit" class="btn btn-primary btn-block">Anmeldelink erzeugen</button></div></form>
+{% endif %}
+{% endblock %}

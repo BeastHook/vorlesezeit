@@ -15,6 +15,7 @@ from app.einladungscode import (
     SmtpZugang,
     decode,
     encode,
+    gueltiger_host,
 )
 
 TOKEN = "eyJhIjoiZmFrZS1hY2NvdW50IiwidCI6ImZha2UtdHVubmVsIiwicyI6ImZha2UifQ"
@@ -59,9 +60,9 @@ def test_umbrueche_leerzeichen_anfuehrungszeichen_und_kleinschreibung():
     [
         ("", "kein Einladungscode"),
         ("hallo", "kein Einladungscode"),
-        ("VZ2-ABCD", "neueren Version"),
-        ("VZ1-", "unvollständig"),
-        ("VZ1-!!!!", "unvollständig"),
+        ("VZ2-ABCD", "gehört zu einer anderen Version von Vorlesezeit"),
+        ("VZ1-", "Dieser Code ist nicht vollständig."),
+        ("VZ1-!!!!", "Dieser Code ist nicht vollständig."),
     ],
 )
 def test_kaputte_codes_melden_einen_satz(code, meldung):
@@ -71,8 +72,34 @@ def test_kaputte_codes_melden_einen_satz(code, meldung):
 
 def test_abgeschnittener_code():
     code = encode(EINLADUNG)
-    with pytest.raises(EinladungscodeError, match="unvollständig"):
+    with pytest.raises(EinladungscodeError) as exc:
         decode(code[: len(code) // 2])
+    assert str(exc.value) == (
+        "Dieser Code ist nicht vollständig. Kopiere ihn bitte noch einmal ganz aus der Nachricht."
+    )
+
+
+def test_andere_version_nennt_den_mockup_satz():
+    with pytest.raises(EinladungscodeError) as exc:
+        decode("VZ2-KRUGS4ZANFZSAYJA")
+    assert str(exc.value) == (
+        "Dieser Code gehört zu einer anderen Version von Vorlesezeit. "
+        "Bitte die Person, die dich eingeladen hat, um einen neuen Code."
+    )
+
+
+@pytest.mark.parametrize(
+    ("host", "gueltig"),
+    [
+        ("berger.vorlesezeit.app", True),
+        ("advent.familie-berger.de", True),
+        ("kein host", False),
+        ("ohnepunkt", False),
+        ("Gross.de", False),
+    ],
+)
+def test_gueltiger_host(host, gueltig):
+    assert gueltiger_host(host) is gueltig
 
 
 @pytest.mark.parametrize(

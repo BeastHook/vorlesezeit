@@ -1,0 +1,16 @@
+{% extends "_wartung.html" %}
+{% block title %}Entfernt{% endblock %}
+{% block content %}
+<div class="center-card">
+  <img class="ornament" src="/static/ornaments/tannenzweig.svg" alt="" width="64" height="64">
+  {% if loeschen %}
+  <h2>Vorlesezeit ist gelöscht</h2>
+  <p class="lead">Programm, Aufnahmen, Datenbank und Sicherungen sind weg. Sag der Person Bescheid, die dich eingeladen hat, damit sie die Adresse {{ adresse }} freigibt.</p>
+  <p class="note">Den Ordner Vorlesezeit mit der Startdatei kannst du jetzt in den Papierkorb legen.</p>
+  {% else %}
+  <h2>Vorlesezeit ist entfernt</h2>
+  <p class="lead">Aufnahmen, Datenbank und Sicherungen sind noch da. Öffnest du die Startdatei wieder, läuft Vorlesezeit mit allem Bisherigen weiter.</p>
+  <p class="note">Du kannst dieses Fenster schließen.</p>
+  {% endif %}
+</div>
+{% endblock %}

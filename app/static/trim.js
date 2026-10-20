@@ -79,7 +79,9 @@
       if (bubble) bubble.textContent = formatTime(t);
     }
     if (summary) {
-      summary.textContent = `${formatTime(start)} – ${formatTime(end)} · Länge ${formatTime(end - start)}`;
+      // Laenge aus den angezeigten (gerundeten) Werten, sonst 0:03,9 bei 0:01,0 – 0:05,0.
+      const length = Math.round(end * 10) / 10 - Math.round(start * 10) / 10;
+      summary.textContent = `${formatTime(start)} – ${formatTime(end)} · Länge ${formatTime(length)}`;
     }
   }
 

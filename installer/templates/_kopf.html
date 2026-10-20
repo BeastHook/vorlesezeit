@@ -1,0 +1,42 @@
+{# Kopf jedes Bildschirms: Zurück links, „Schritt x von 7: Name“ rechts, darunter der Balken. #}
+{% macro kopf(nummer, name, zurueck=None) -%}
+{%- set breite = '%g' | format((nummer * 100 / 7) | round(1)) -%}
+<div class="wz-head">
+  {%- if zurueck %}<a class="btn btn-ghost wz-back" href="{{ zurueck }}">‹ Zurück</a>{% endif -%}
+  <span class="meta">Schritt {{ nummer }} von 7: {{ name }}</span>
+</div>
+<div class="progress" role="progressbar" aria-label="Schritt {{ nummer }} von 7" aria-valuemin="1" aria-valuemax="7" aria-valuenow="{{ nummer }}"><div style="width:{{ breite }}%"></div></div>
+{%- endmacro %}
+
+{% macro technik(text) -%}
+<details class="wz-tech"><summary>Technische Einzelheiten</summary><pre>{{ text }}</pre></details>
+{%- endmacro %}
+
+{% macro meldung(m) -%}
+{% if m %}<div class="flash {{ 'ok' if m.ok else 'err' }} wz-flash" role="{{ 'status' if m.ok else 'alert' }}">{{ m.satz }}</div>
+{% if m.technik %}{{ technik(m.technik) }}{% endif %}{% endif %}
+{%- endmacro %}
+
+{# Wartung: „‹ Übersicht“ links (nicht während eines Vorgangs), der Name der Aufgabe rechts. #}
+{% macro aufgabe(name, zurueck=True) -%}
+<div class="wz-head">
+  {%- if zurueck %}<a class="btn btn-ghost wz-back" href="/wartung">‹ Übersicht</a>{% endif -%}
+  <span class="meta">{{ name }}</span>
+</div>
+{%- endmacro %}
+
+{# Statuszeilen und Fortschritt; eine rote Zeile trägt höchstens eine Handlung. #}
+{% macro checks(zeilen, live=False, label=None) -%}
+<ul class="wz-checks"{% if live %} aria-live="polite"{% endif %}{% if label %} aria-label="{{ label }}"{% endif %}>
+  {% for z in zeilen %}
+  {% set ic = {"ok": "ok", "fehler": "err", "laeuft": "run", "wartet": "wait"}[z.zustand] %}
+  <li{% if z.zustand == "fehler" %} class="is-err"{% elif z.zustand == "wartet" %} class="is-wait"{% endif %}><span class="wz-ic {{ ic }}" aria-hidden="true">{% if z.zustand == "ok" %}✓{% elif z.zustand == "fehler" %}{{ z.zeichen or ('!' if z.meta else '✗') }}{% endif %}</span><span class="txt">{{ z.text }}{% if z.meta %}<span class="meta">{{ z.meta }}</span>{% endif %}</span>{% if z.knopf %}<a class="btn btn-secondary" href="{{ z.knopf[1] }}">{{ z.knopf[0] }}</a>{% endif %}</li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{% macro hauptknopf(knopf) -%}
+{% if knopf.post %}<form method="post" action="{{ knopf.post }}"><div class="wz-foot"><button type="submit" class="btn btn-primary btn-block">{{ knopf.text }}</button></div></form>
+{% else %}<div class="wz-foot"><a class="btn btn-primary btn-block" href="{{ knopf.href }}">{{ knopf.text }}</a></div>
+{% endif %}
+{%- endmacro %}

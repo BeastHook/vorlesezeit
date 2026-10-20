@@ -1,0 +1,28 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf, meldung as zeige %}
+{% block title %}Sicherung{% endblock %}
+{% block content %}
+{{ kopf(5, "Sicherung", "/mail") }}
+<h1 class="wz-q">Wohin soll die tägliche Sicherung?</h1>
+<p class="lead">Am besten auf eine Festplatte oder einen USB-Stick, der angesteckt bleibt. Geht der Rechner kaputt, sind die Aufnahmen dort noch da.</p>
+<form method="post" action="/sicherung">
+  <div class="wz-opts" role="radiogroup" aria-label="Laufwerk">
+    {% for lw in laufwerke %}
+    <label class="wz-opt{% if lw.id == fehler_id %} is-err{% endif %}"><input type="radio" name="laufwerk" value="{{ lw.id }}"{% if lw.id == gewaehlt or (gewaehlt is none and loop.first) %} checked{% endif %}><span class="txt"><span class="name">{{ lw.name }}</span><span class="meta">{% if lw.system %}dieser Rechner, {% endif %}{{ lw.frei }} frei</span></span>{% if lw.system %}<span class="tag tag-neutral">nicht empfohlen</span>{% endif %}</label>
+    {% endfor %}
+  </div>
+  {% if laufwerke | length == 1 %}<p class="meta wz-abstand">Steck eine Festplatte oder einen Stick an, dann erscheint er hier.</p>{% endif %}
+  {{ zeige(meldung) }}
+  <div class="wz-foot">
+    {% if meldung and meldung.ok %}
+    <a class="btn btn-primary btn-block" href="/zusammenfassung">Weiter</a>
+    {% else %}
+    <button type="submit" name="aktion" value="sichern" class="btn btn-primary btn-block">Hier sichern</button>
+    <p class="note">„Hier sichern“ legt dort den Ordner „Vorlesezeit-Sicherung“ an.</p>
+    {% endif %}
+    <button type="submit" name="aktion" value="suchen" class="btn btn-secondary btn-block">Neu suchen</button>
+    <button type="submit" name="aktion" value="spaeter" class="btn btn-ghost">Später</button>
+    <p class="note">Bis dahin landet die Sicherung auf diesem Rechner.</p>
+  </div>
+</form>
+{% endblock %}

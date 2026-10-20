@@ -1,0 +1,19 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf %}
+{% block title %}Du{% endblock %}
+{% block content %}
+{{ kopf(3, "Du", "/adresse") }}
+<h1 class="wz-q">Wer kümmert sich um den Kalender?</h1>
+<form method="post" action="/du">
+  <div class="field"><label for="admin_email">Deine E-Mail-Adresse</label>
+    <input class="input{% if fehler %} is-err{% endif %}" id="admin_email" name="admin_email" type="email" value="{{ email }}" autocomplete="email" required{% if fehler %} aria-invalid="true" aria-describedby="mail-err"{% endif %}></div>
+  {% if fehler %}<p class="field-err" id="mail-err">{{ fehler }}</p>{% endif %}
+  <p class="meta">Dahin schicken wir dir gleich deinen Anmeldelink.</p>
+  <div class="field wz-feld"><label for="anzeigename">So nennt dich die Familie</label>
+    <input class="input{% if name_fehler %} is-err{% endif %}" id="anzeigename" name="anzeigename" value="{{ name }}" autocomplete="given-name"{% if name_fehler %} aria-invalid="true" aria-describedby="name-err"{% endif %}></div>
+  {% if name_fehler %}<p class="field-err" id="name-err">{{ name_fehler }}</p>{% endif %}
+  <p class="meta">Steht in den Mails an die Familie, zum Beispiel „liegt jetzt bei Anja zur Freigabe“.</p>
+  <p class="note wz-note-links">Für wen der Kalender ist und dein tonies-Konto trägst du später in Vorlesezeit selbst ein.</p>
+  <div class="wz-foot"><button type="submit" class="btn btn-primary btn-block">Weiter</button></div>
+</form>
+{% endblock %}

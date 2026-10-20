@@ -13,7 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Auftrag, Beitrag, Campaign, Person, Slot
-from tests.fixtures.audio import make_tone_webm, make_wrong_format_mp3
+from tests.fixtures.audio import (
+    make_tone_mp3,
+    make_tone_mp4_aac,
+    make_tone_webm,
+    make_wrong_format_mp3,
+)
 
 
 def _calendar(db_session: Session, name: str = "Familie") -> Campaign:
@@ -99,6 +104,28 @@ def test_slot_with_vorlesetext_shows_choice(person_client: TestClient, db_sessio
 
     assert response.status_code == 200
     assert "Vorschlag vorlesen" in response.text
+
+
+def test_slot_with_vorlesetext_shows_scroll_toggle(person_client: TestClient, db_session: Session):
+    person = _current_person(db_session)
+    auftrag = _make_auftrag(db_session, person, day=3, vorlesetext="Es war einmal...")
+
+    html = person_client.get(f"/record/auftrag/{auftrag.id}").text
+
+    toggle = html.split('data-role="scroll-toggle"')[1].split(">")[0]
+    assert 'aria-pressed="false"' in toggle
+    assert 'aria-label="Lauftext starten"' in toggle
+    # Mockup Fassung 3: der Knopf steht neben "Aufnehmen", also nach den Reglern.
+    assert html.index('data-role="scroll-speed"') < html.index('data-role="scroll-toggle"')
+
+
+def test_scroll_toggle_missing_without_vorlesetext(person_client: TestClient, db_session: Session):
+    person = _current_person(db_session)
+    auftrag = _make_auftrag(db_session, person, day=3)
+
+    html = person_client.get(f"/record/auftrag/{auftrag.id}").text
+    assert 'data-role="scroll-toggle"' not in html
+    assert 'data-role="scroll-toggle"' not in person_client.get("/record/free").text
 
 
 def test_record_page_has_ornament_halo_and_timer_in_stop_button(
@@ -802,3 +829,92 @@ def test_family_pages_carry_desktop_layout_classes(person_client, db_session: Se
     record = person_client.get(f"/record/auftrag/{auftrag.id}").text
     assert '<main class="page page-lesen">' in record
     assert '<main class="page page-lesen">' in person_client.get("/record/free").text
+
+
+def test_auftrag_page_offers_file_upload_below_hint(person_client: TestClient, db_session: Session):
+    person = _current_person(db_session)
+    auftrag = _make_auftrag(db_session, person, day=3)
+
+    html = person_client.get(f"/record/auftrag/{auftrag.id}").text
+
+    assert 'type="file"' in html
+    assert 'accept="audio/*"' in html
+    assert 'data-role="upload-btn"' in html
+    assert "Datei wählen (mp3, m4a, wav, ogg …)" in html
+    upload_btn = html.split('data-role="upload-btn"')[0].rsplit("<button", 1)[1]
+    assert 'type="button"' in upload_btn
+    assert "disabled" in html.split('data-role="upload-btn"')[1].split(">")[0]
+    assert (
+        html.index("Lies in Ruhe vor.")
+        < html.index('data-role="file-input"')
+        < html.index('data-state="recording"')
+    )
+
+
+def test_auftrag_page_folds_file_upload_into_closed_details(
+    person_client: TestClient, db_session: Session
+):
+    person = _current_person(db_session)
+    auftrag = _make_auftrag(db_session, person, day=3)
+
+    html = person_client.get(f"/record/auftrag/{auftrag.id}").text
+
+    # Mockup docs/design/lauftext-sichtbar-mockup.html, Fassung 2.
+    before, rest = html.split('data-role="file-input"')
+    assert "<details" in before
+    details = before.rsplit("<details", 1)[1]
+    assert "</details>" not in details
+    details_tag = details.split(">")[0]
+    assert "upload-details" in details_tag
+    assert "open" not in details_tag
+    assert rest.index('data-role="upload-btn"') < rest.index("</details>")
+    summary = details.split("<summary", 1)[1].split("</summary>")[0]
+    assert "Datei" in summary
+    assert (
+        html.index('data-state="idle"')
+        < html.index("upload-details")
+        < html.index('data-state="recording"')
+    )
+
+
+def test_free_recording_has_no_file_upload(person_client: TestClient):
+    html = person_client.get("/record/free").text
+
+    assert 'data-role="file-input"' not in html
+    assert 'data-role="upload-btn"' not in html
+
+
+def test_uploaded_mp3_file_creates_beitrag(person_client: TestClient, db_session: Session):
+    person = _current_person(db_session)
+    auftrag = _make_auftrag(db_session, person, day=3)
+
+    response = person_client.post(
+        f"/record/auftrag/{auftrag.id}",
+        files={"audio": ("geschichte.mp3", make_tone_mp3(seconds=1.0), "audio/mpeg")},
+        data={"title": "", "reported_type": "audio/mpeg"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["next_url"].endswith(f"/record/auftrag/{auftrag.id}/confirmed")
+    beitrag = db_session.execute(
+        select(Beitrag).where(Beitrag.auftrag_id == auftrag.id, Beitrag.person_id == person.id)
+    ).scalar_one()
+    assert beitrag.audio_object_key is not None
+
+
+def test_uploaded_m4a_file_creates_beitrag(person_client: TestClient, db_session: Session):
+    person = _current_person(db_session)
+    auftrag = _make_auftrag(db_session, person, day=3)
+
+    response = person_client.post(
+        f"/record/auftrag/{auftrag.id}",
+        files={"audio": ("geschichte.m4a", make_tone_mp4_aac(seconds=1.0), "audio/mp4")},
+        data={"title": "", "reported_type": "audio/mp4"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["next_url"].endswith(f"/record/auftrag/{auftrag.id}/confirmed")
+    beitrag = db_session.execute(
+        select(Beitrag).where(Beitrag.auftrag_id == auftrag.id, Beitrag.person_id == person.id)
+    ).scalar_one()
+    assert beitrag.audio_object_key is not None

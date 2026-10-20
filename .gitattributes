@@ -1,0 +1,2 @@
+# Windows-Startdatei: cmd braucht CRLF, sonst springen Sprungmarken daneben.
+installer/start/*.bat text eol=crlf

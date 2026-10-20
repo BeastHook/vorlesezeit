@@ -3,8 +3,10 @@
 Test scenarios aus dem Plan:
 - Frische Instanz ohne SMTP: Start erzeugt genau einen Link, das Log enthaelt
   den Pfad, die Datenbank nur den Hash.
-- AE12: "letzte Mail scheiterte" gesetzt -> Start erzeugt einen Link, ein
-  aelterer ist danach ungueltig.
+- AE12: "letzte Mail scheiterte" gesetzt und die Anmeldeprobe scheitert ->
+  Start erzeugt einen Link, ein aelterer ist danach ungueltig.
+- "letzte Mail scheiterte" gesetzt, die Anmeldeprobe gelingt: kein Link, ein
+  aelterer bleibt gueltig.
 - Nutzbarer SMTP-Zugang: kein Link.
 - Gueltiger Link per POST: Admin-Sitzung, Weiterleitung ins Setup; zweiter
   Gebrauch ergibt "Link ungueltig".
@@ -86,22 +88,43 @@ def test_usable_smtp_creates_no_link(configured_env, db_session: Session, caplog
     assert _links(db_session) == []
 
 
-def test_failed_last_mail_creates_new_link_and_invalidates_older_ae12(
-    configured_env, db_session: Session, caplog
-):
+OLDER = "aelterer-token-aus-einem-frueheren-start"
+
+
+def _older_link_and_failed_mail(db_session: Session) -> None:
+    """Start mit nutzbarem SMTP, danach ein offener Link und "letzte Mail scheiterte"."""
     with TestClient(create_app()):
         pass  # SMTP aus der Umgebung uebernommen, nutzbar
-    older = "aelterer-token-aus-einem-frueheren-start"
     now = datetime.now(UTC).replace(tzinfo=None)
     db_session.add(
         Einrichtungslink(
-            token_hash=hashlib.sha256(older.encode()).hexdigest(),
+            token_hash=hashlib.sha256(OLDER.encode()).hexdigest(),
             created_at=now,
             expires_at=now + timedelta(hours=24),
         )
     )
     db_session.get(Einstellungen, 1).mail_failed_at = now
     db_session.commit()
+
+
+def _probe(monkeypatch, result: bool) -> list[tuple]:
+    """Ersetzt die Anmeldeprobe; liefert die Liste ihrer Aufrufe."""
+    calls: list[tuple] = []
+
+    def fake(*args):
+        calls.append(args)
+        return result
+
+    monkeypatch.setattr("app.auth.einrichtung.probe_login", fake)
+    return calls
+
+
+def test_failed_last_mail_creates_new_link_and_invalidates_older_ae12(
+    configured_env, db_session: Session, caplog, monkeypatch
+):
+    calls = _probe(monkeypatch, False)
+    _older_link_and_failed_mail(db_session)
+    older = OLDER
 
     with caplog.at_level(logging.INFO, logger="app"):
         with TestClient(create_app()) as client:
@@ -112,6 +135,46 @@ def test_failed_last_mail_creates_new_link_and_invalidates_older_ae12(
     old, new = _links(db_session)
     assert old.invalidated_at is not None
     assert new.invalidated_at is None
+    assert len(calls) == 1
+
+
+def test_failed_last_mail_with_working_login_creates_no_link(
+    configured_env, db_session: Session, caplog, monkeypatch
+):
+    calls = _probe(monkeypatch, True)
+    _older_link_and_failed_mail(db_session)
+
+    with caplog.at_level(logging.INFO, logger="app"):
+        with TestClient(create_app()):
+            pass
+
+    assert _tokens(caplog) == []
+    assert len(_links(db_session)) == 1
+    assert len(calls) == 1
+
+
+def test_failed_last_mail_with_working_login_keeps_older_link_valid(
+    configured_env, db_session: Session, monkeypatch
+):
+    _probe(monkeypatch, True)
+    _older_link_and_failed_mail(db_session)
+
+    with TestClient(create_app()) as client:
+        response = client.post(f"/einrichtung/{OLDER}", follow_redirects=False)
+
+    assert response.status_code == 303
+    [link] = _links(db_session)
+    assert link.invalidated_at is None and link.used_at is not None
+
+
+def test_no_probe_without_failed_mail(configured_env, db_session: Session, monkeypatch):
+    calls = _probe(monkeypatch, False)
+
+    with TestClient(create_app()):
+        pass
+
+    assert calls == []
+    assert _links(db_session) == []
 
 
 def test_smtp_not_decryptable_creates_link(
@@ -212,3 +275,24 @@ def test_access_log_redacts_setup_token(path, expected):
     )
     assert RedactTokenFilter().filter(record) is True
     assert record.args[2] == expected
+
+
+# --- Anmeldelink aus dem Wartungsassistenten (One-Klick-Setup Baustein 4) ----------
+
+
+def test_cli_prints_only_a_valid_path_and_invalidates_older_link(fresh, capsys, caplog):
+    from app.auth import anmeldelink
+
+    client, older = fresh
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        assert anmeldelink.main() == 0
+
+    out = capsys.readouterr().out
+    [line] = out.splitlines()
+    match = re.fullmatch(r"/einrichtung/([A-Za-z0-9_-]+)", line)
+    assert match is not None
+    token = match.group(1)
+    assert client.get(f"/einrichtung/{token}").status_code == 200
+    assert client.get(f"/einrichtung/{older}").status_code == 400
+    assert all(token not in r.getMessage() for r in caplog.records)

@@ -432,6 +432,54 @@ def test_unapprove_before_delivery_reopens_slot_ae15(admin_client: TestClient, d
     assert is_slot_open(db_session, db_session.get(Slot, slot.id))
 
 
+def test_unapprove_shows_withdrawn_label_in_list(admin_client: TestClient, db_session: Session):
+    _, person = _setup(db_session)
+    b = _beitrag(admin_client, db_session, person, _slot(db_session, 9), approved_at=_now())
+
+    admin_client.post(f"/admin/aufnahmen/{b.id}/zuruecknehmen")
+
+    db_session.expire_all()
+    assert db_session.get(Beitrag, b.id).withdrawn_at is not None
+    page = admin_client.get("/admin/aufnahmen").text
+    assert "Freigabe zurückgenommen" in page
+
+
+def test_reject_after_unapprove_clears_withdrawn(
+    admin_client: TestClient, db_session: Session, monkeypatch
+):
+    monkeypatch.setattr("app.admin.review.send_rejection_mail", lambda config, **kw: None)
+    _, person = _setup(db_session)
+    b = _beitrag(admin_client, db_session, person, _slot(db_session, 9), approved_at=_now())
+    admin_client.post(f"/admin/aufnahmen/{b.id}/zuruecknehmen")
+    db_session.expire_all()
+    assert db_session.get(Beitrag, b.id).withdrawn_at is not None
+
+    admin_client.post(f"/admin/aufnahmen/{b.id}/ablehnen", data={"comment": ""})
+
+    db_session.expire_all()
+    b = db_session.get(Beitrag, b.id)
+    assert b.rejected_at is not None
+    assert b.withdrawn_at is None
+    page = admin_client.get("/admin/aufnahmen").text
+    assert "abgelehnt" in page
+    assert "Freigabe zurückgenommen" not in page
+
+
+def test_approve_after_unapprove_clears_withdrawn(admin_client: TestClient, db_session: Session):
+    _, person = _setup(db_session)
+    b = _beitrag(admin_client, db_session, person, _slot(db_session, 9), approved_at=_now())
+    admin_client.post(f"/admin/aufnahmen/{b.id}/zuruecknehmen")
+    db_session.expire_all()
+    assert db_session.get(Beitrag, b.id).withdrawn_at is not None
+
+    admin_client.post(f"/admin/aufnahmen/{b.id}/freigeben")
+
+    db_session.expire_all()
+    b = db_session.get(Beitrag, b.id)
+    assert b.approved_at is not None
+    assert b.withdrawn_at is None
+
+
 def test_unapprove_after_delivery_refused_ae15(admin_client: TestClient, db_session: Session):
     campaign, person = _setup(db_session)
     b = _beitrag(admin_client, db_session, person, _slot(db_session, 6), approved_at=_now())

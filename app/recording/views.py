@@ -174,6 +174,7 @@ def _handle_submission(
             existing.audio_object_key = key
             existing.title = clean_title
             existing.rejected_at = None
+            existing.withdrawn_at = None
             beitrag = existing
         elif auftrag is not None:
             # Derselbe Dienst wie der Admin-Upload: gilt an jedem Kalendertag

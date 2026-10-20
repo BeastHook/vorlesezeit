@@ -1,7 +1,10 @@
 """Mehrkalender U4: Einmal-Einrichtungslink aus dem Containerlog (R30, KTD7).
 
 Ohne nutzbaren SMTP-Zugang kann kein Magic Link verschickt werden -- auch nicht
-an den Admin. Dann schreibt jeder Start einen neuen Link ins Log (nur den Pfad,
+an den Admin. Nicht nutzbar heisst: nicht eingetragen bzw. nicht entschluesselbar,
+oder die letzte Mail scheiterte und eine Anmeldeprobe beim Start scheitert
+ebenfalls (ein einzelner kurzer Netzfehler erzeugt so keinen Link). Dann
+schreibt jeder Start einen neuen Link ins Log (nur den Pfad,
 die Adresse haengt der Admin selbst davor: `X-Forwarded-Proto`-Pitfall). In
 der Datenbank steht nur der SHA-256-Hash. Der Link ist 24 h gueltig, einmal
 verwendbar, und jeder neue Start entwertet aeltere.
@@ -25,6 +28,7 @@ from sqlalchemy.orm import Session
 from app import settings
 from app.auth.dependencies import get_db
 from app.auth.session import login as start_session
+from app.mail.smtp import probe_login
 from app.models import Einrichtungslink, Person
 from app.templating import templates
 
@@ -50,18 +54,20 @@ def _hash(token: str) -> str:
 
 
 def smtp_usable(session: Session, key: str | None) -> bool:
-    """R30: eingetragen, entschluesselbar und die letzte Mail nicht gescheitert."""
-    if settings.smtp_zugang(session, key) is None:
+    """R30: eingetragen, entschluesselbar und entweder die letzte Mail nicht
+    gescheitert oder eine Anmeldeprobe gelingt. Nur nach einer gescheiterten
+    Mail baut der Start eine Verbindung auf."""
+    zugang = settings.smtp_zugang(session, key)
+    if zugang is None:
         return False
-    return settings.get_einstellungen(session).mail_failed_at is None
+    if settings.get_einstellungen(session).mail_failed_at is None:
+        return True
+    return probe_login(zugang.host, zugang.port, zugang.user, zugang.password)
 
 
-def issue_link_if_needed(session: Session, key: str | None, *, now: datetime) -> bool:
-    """Beim Start: ist SMTP nicht nutzbar, aeltere Links entwerten, einen neuen
-    erzeugen und seinen Pfad ins Log schreiben. Der Klartext steht nur in
-    diesem einen Logeintrag. Liefert, ob ein Link entstand."""
-    if smtp_usable(session, key):
-        return False
+def issue_link(session: Session, *, now: datetime) -> str:
+    """Aeltere offene Links entwerten, einen neuen anlegen (nur der Hash in der
+    Datenbank, 24 h gueltig) und seinen Token liefern."""
     moment = _naive_utc(now)
     session.execute(
         update(Einrichtungslink)
@@ -75,6 +81,16 @@ def issue_link_if_needed(session: Session, key: str | None, *, now: datetime) ->
         )
     )
     session.commit()
+    return token
+
+
+def issue_link_if_needed(session: Session, key: str | None, *, now: datetime) -> bool:
+    """Beim Start: ist SMTP nicht nutzbar, einen neuen Link erzeugen und seinen
+    Pfad ins Log schreiben. Der Klartext steht nur in diesem einen Logeintrag.
+    Liefert, ob ein Link entstand."""
+    if smtp_usable(session, key):
+        return False
+    token = issue_link(session, now=now)
     logger.warning(
         "Kein nutzbarer SMTP-Zugang. Einrichtungslink (24 h gueltig, einmal verwendbar), "
         "an die eigene Adresse haengen: /einrichtung/%s",

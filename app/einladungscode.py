@@ -25,6 +25,11 @@ _HOST = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$")
 _ANDERE_VERSION = re.compile(r"^VZ\d+-")
 
 
+def gueltiger_host(host: str) -> bool:
+    """Dieselbe Regel für den Host im Code und für die eigene Domain im Installer."""
+    return bool(_HOST.match(host))
+
+
 class EinladungscodeError(ValueError):
     """Ein Satz für den Freund, ohne Inhalt aus dem Code."""
 
@@ -61,8 +66,8 @@ def decode(code: str) -> Einladung:
     if not compact.startswith(PREFIX):
         if _ANDERE_VERSION.match(compact):
             raise EinladungscodeError(
-                "Dieser Einladungscode gehört zu einer neueren Version. "
-                "Bitte lade die Startdatei neu herunter."
+                "Dieser Code gehört zu einer anderen Version von Vorlesezeit. "
+                "Bitte die Person, die dich eingeladen hat, um einen neuen Code."
             )
         raise EinladungscodeError("Das ist kein Einladungscode. Er beginnt mit VZ1-.")
     body = compact[len(PREFIX) :]
@@ -71,7 +76,8 @@ def decode(code: str) -> Einladung:
         data = json.loads(zlib.decompress(raw))
     except (binascii.Error, ValueError, zlib.error):
         raise EinladungscodeError(
-            "Der Einladungscode ist unvollständig. Bitte kopiere ihn noch einmal ganz."
+            "Dieser Code ist nicht vollständig. "
+            "Kopiere ihn bitte noch einmal ganz aus der Nachricht."
         ) from None
     return _pruefe(data)
 
@@ -81,7 +87,7 @@ def _pruefe(data: object) -> Einladung:
     if not isinstance(data, dict) or data.get("v") != VERSION:
         raise ungueltig
     host, token, smtp = data.get("host"), data.get("tunnel_token"), data.get("smtp")
-    if not isinstance(host, str) or not _HOST.match(host):
+    if not isinstance(host, str) or not gueltiger_host(host):
         raise ungueltig
     if not isinstance(token, str) or not token:
         raise ungueltig

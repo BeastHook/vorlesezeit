@@ -1,0 +1,29 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf %}
+{% block title %}Adresse{% endblock %}
+{% block content %}
+{{ kopf(2, "Adresse", "/geraet") }}
+<h1 class="wz-q">Unter welcher Adresse findet dich die Familie?</h1>
+<form method="get" action="/adresse" class="choice-row" role="radiogroup" aria-label="Art der Adresse">
+  <button type="submit" name="art" value="code" class="choice-btn{% if art == 'code' %} selected{% endif %}" aria-pressed="{{ 'true' if art == 'code' else 'false' }}">Ich habe einen Einladungscode</button>
+  <button type="submit" name="art" value="domain" class="choice-btn{% if art == 'domain' %} selected{% endif %}" aria-pressed="{{ 'true' if art == 'domain' else 'false' }}">Eigene Domain</button>
+</form>
+<form method="post" action="/adresse">
+  <input type="hidden" name="art" value="{{ art }}">
+  {% if art == "code" %}
+  <div class="field"><label for="code">Einladungscode</label>
+    <textarea class="input wz-code{% if status and not status.ok %} is-err{% endif %}" id="code" name="code" data-pruefen="/adresse/pruefen" spellcheck="false" autocomplete="off"{% if status and not status.ok %} aria-invalid="true" aria-describedby="code-err"{% endif %}>{{ code }}</textarea></div>
+  {% if status %}{% include "_code_status.html" %}{% else %}<div id="code-status" data-ok="0"></div>{% endif %}
+  {% else %}
+  <p class="meta">Für alle, die schon eine Domain bei Cloudflare haben. Du brauchst einen Tunnel, der auf <code>http://app:8000</code> zeigt.</p>
+  <div class="field"><label for="host">Adresse</label>
+    <input class="input{% if fehler.host %} is-err{% endif %}" id="host" name="host" value="{{ host }}" autocomplete="off" spellcheck="false"{% if fehler.host %} aria-invalid="true" aria-describedby="host-err"{% endif %}></div>
+  {% if fehler.host %}<p class="field-err" id="host-err">{{ fehler.host }}</p>{% endif %}
+  <div class="field wz-feld"><label for="tunnel_token">Tunnel-Token</label>
+    <input class="input{% if fehler.tunnel_token %} is-err{% endif %}" id="tunnel_token" name="tunnel_token" type="password" autocomplete="off"{% if fehler.tunnel_token %} aria-invalid="true" aria-describedby="token-err"{% endif %}></div>
+  {% if fehler.tunnel_token %}<p class="field-err" id="token-err">{{ fehler.tunnel_token }}</p>{% endif %}
+  <p><a class="wz-link" href="https://github.com/BeastHook/vorlesezeit/blob/main/docs/betrieb.md#cloudflare-einrichten" target="_blank" rel="noopener">Kurzanleitung: Tunnel bei Cloudflare anlegen</a></p>
+  {% endif %}
+  <div class="wz-foot"><button type="submit" class="btn btn-primary btn-block" data-weiter>Weiter</button></div>
+</form>
+{% endblock %}

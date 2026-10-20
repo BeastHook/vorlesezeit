@@ -13,6 +13,7 @@ Test scenarios aus dem Plan:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
@@ -236,6 +237,65 @@ def test_failed_invite_leaves_invited_at_empty(
     assert "flash err" in response.text
     db_session.expire_all()
     assert db_session.get(Person, klaus.id).invited_at is None
+
+
+def _assert_log_clean(caplog) -> None:
+    assert "smtp down" not in caplog.text
+    assert "klaus@example.test" not in caplog.text
+    assert "token=" not in caplog.text
+    for record in caplog.records:
+        if record.name == "app.admin.people":
+            assert record.exc_info is None
+
+
+def test_reminder_mail_failure_is_logged_without_details(
+    admin_client: TestClient, db_session: Session, monkeypatch, caplog
+):
+    campaign = _campaign(db_session)
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    _assign(db_session, campaign, klaus, 14)
+
+    def boom(config, **kwargs):
+        raise OSError("smtp down klaus@example.test")
+
+    monkeypatch.setattr("app.admin.people.send_reminder_mail", boom)
+    with caplog.at_level(logging.INFO):
+        response = admin_client.post(f"/admin/personen/{klaus.id}/erinnern")
+
+    assert "flash err" in response.text
+    assert "Erinnerung an Klaus konnte nicht verschickt werden." in response.text
+    assert f"Erinnerungs-Mail fehlgeschlagen: person={klaus.id} fehler=OSError" in caplog.text
+    _assert_log_clean(caplog)
+
+
+def test_invite_mail_failure_is_logged_without_details(
+    admin_client: TestClient, db_session: Session, monkeypatch, caplog
+):
+    def boom(config, **kwargs):
+        raise OSError("smtp down klaus@example.test")
+
+    monkeypatch.setattr("app.admin.people.send_invitation_mail", boom)
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+
+    with caplog.at_level(logging.INFO):
+        response = admin_client.post(f"/admin/personen/{klaus.id}/einladen")
+
+    assert "flash err" in response.text
+    assert "Einladung an Klaus konnte nicht verschickt werden." in response.text
+    assert f"Einladungs-Mail fehlgeschlagen: person={klaus.id} fehler=OSError" in caplog.text
+    _assert_log_clean(caplog)
+
+
+def test_successful_invite_writes_no_log(
+    admin_client: TestClient, db_session: Session, mails, caplog
+):
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+
+    with caplog.at_level(logging.INFO):
+        response = admin_client.post(f"/admin/personen/{klaus.id}/einladen")
+
+    assert "Einladung an Klaus verschickt." in response.text
+    assert [r for r in caplog.records if r.name == "app.admin.people"] == []
 
 
 def test_reminder_builds_plain_text_message():

@@ -34,3 +34,11 @@ def test_kein_port_nach_aussen_und_kein_docker_socket():
     text = VORLAGE.read_text()
     assert "ports:" not in text
     assert "docker.sock" not in text
+
+
+def test_volumes_nicht_external():
+    # Deinstallieren mit Löschen nutzt `compose down --volumes`; das entfernt
+    # nur Volumes, die compose selbst anlegt.
+    text = VORLAGE.read_text()
+    assert "external" not in text
+    assert re.search(r"^volumes:\n  db-data:\n  s3-data:\n  backup-marker:\n?\Z", text, re.M)

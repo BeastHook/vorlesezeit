@@ -16,6 +16,7 @@ from __future__ import annotations
 import ssl
 import threading
 import time
+import weakref
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -413,7 +414,8 @@ class TonieCloudFactory:
     zwischengespeichert, solange Benutzername und Passwort gleich bleiben.
     Schluessel des Zwischenspeichers ist ein HMAC-Fingerabdruck der
     Zugangsdaten, nie der Klartext; ein Passwortwechsel ergibt einen neuen
-    Fingerabdruck und damit einen neuen Client mit frischer Anmeldung."""
+    Fingerabdruck und damit einen neuen Client mit frischer Anmeldung. Der
+    ersetzte Client wird geschlossen, sobald ihn niemand mehr referenziert."""
 
     def __init__(
         self,
@@ -444,8 +446,10 @@ class TonieCloudFactory:
             cached = self._clients.get(konto_id)
             if cached is not None and cached[0] == fp:
                 return cached[1]
-            # Den alten Client nicht schliessen: ein laufender Lauf benutzt ihn
-            # vielleicht noch.
+            # Den ersetzten Client erst schliessen, wenn niemand ihn mehr
+            # haelt: ein laufender Lauf benutzt ihn vielleicht noch (R24).
+            if cached is not None:
+                weakref.finalize(cached[1], cached[1]._http.close)
             client = TonieCloudClient(
                 zugang.username, zugang.password, transport=self._transport, sleep=self._sleep
             )

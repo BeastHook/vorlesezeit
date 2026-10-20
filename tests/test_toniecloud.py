@@ -10,6 +10,7 @@ laeuft separat und manuell.
 
 from __future__ import annotations
 
+import gc
 import ssl
 from datetime import datetime
 from urllib.parse import parse_qs
@@ -725,6 +726,49 @@ def test_password_change_drops_cached_token_of_this_konto_only(db_session):
 
     assert transport.logins == ["oma@example.test", "opa@example.test", "oma@example.test"]
     assert transport.login_passwords()[-1] == "pw-oma-neu"
+
+
+def test_replaced_client_is_closed_after_last_reference_is_gone(db_session):
+    factory = make_factory(AccountTransport())
+    oma = add_konto(db_session, "oma@example.test", "pw-oma")
+    old_client = factory.for_konto(db_session, oma)
+    old_http = old_client._http
+
+    st.set_konto_password(db_session, KEY, oma, "pw-oma-neu", now=NOW)
+    new_client = factory.for_konto(db_session, oma)
+    del old_client
+    gc.collect()
+
+    assert old_http.is_closed
+    assert not new_client._http.is_closed
+
+
+def test_replaced_client_stays_usable_while_a_run_still_holds_it(db_session):
+    factory = make_factory(AccountTransport())
+    oma = add_konto(db_session, "oma@example.test", "pw-oma")
+    old_client = factory.for_konto(db_session, oma)
+
+    st.set_konto_password(db_session, KEY, oma, "pw-oma-neu", now=NOW)
+    factory.for_konto(db_session, oma)
+    gc.collect()
+
+    assert not old_client._http.is_closed
+    old_client.list_creative_tonies()
+
+
+def test_password_change_of_one_konto_keeps_other_client_open(db_session):
+    factory = make_factory(AccountTransport())
+    oma = add_konto(db_session, "oma@example.test", "pw-oma")
+    opa = add_konto(db_session, "opa@example.test", "pw-opa")
+    factory.for_konto(db_session, oma)
+    client_opa = factory.for_konto(db_session, opa)
+
+    st.set_konto_password(db_session, KEY, oma, "pw-oma-neu", now=NOW)
+    factory.for_konto(db_session, oma)
+    gc.collect()
+
+    assert not client_opa._http.is_closed
+    assert factory.for_konto(db_session, opa) is client_opa
 
 
 def test_konto_needing_reentry_raises_named_error_without_any_http_call(db_session):

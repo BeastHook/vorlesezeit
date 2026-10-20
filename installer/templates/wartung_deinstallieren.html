@@ -1,0 +1,21 @@
+{% extends "_wartung.html" %}
+{% from "_kopf.html" import aufgabe %}
+{% block title %}Deinstallieren{% endblock %}
+{% block content %}
+{{ aufgabe("Deinstallieren") }}
+<h1 class="wz-q">Vorlesezeit von diesem Rechner entfernen?</h1>
+<p class="lead">Danach ist <strong>{{ adresse }}</strong> nicht mehr erreichbar und abends kommt nichts mehr auf den Tonie.</p>
+<ul class="wz-checks">
+  <li><span class="wz-ic ok" aria-hidden="true">✓</span><span class="txt">Aufnahmen und Datenbank bleiben<span class="meta">im Ordner Vorlesezeit auf diesem Rechner</span></span></li>
+  <li><span class="wz-ic ok" aria-hidden="true">✓</span><span class="txt">Sicherungen bleiben<span class="meta">auf {{ ziel.name }}</span></span></li>
+</ul>
+<form method="post" action="/wartung/deinstallieren">
+  <label class="wz-confirm wz-abstand{% if loeschen %} wz-danger{% endif %}"><input type="checkbox" class="checkbox" name="loeschen" data-loeschen{% if loeschen %} checked{% endif %}><span>Auch alle Aufnahmen, die Datenbank und die Sicherungen löschen</span></label>
+  <div data-loeschen-feld{% if not loeschen %} hidden{% endif %}>
+    <div class="flash err wz-flash" role="alert">Alle Aufnahmen der Familie sind danach weg, auch auf {{ ziel.name }}. Das lässt sich nicht rückgängig machen.</div>
+    <div class="field wz-feld"><label for="instanz">Tippe zur Bestätigung <strong>{{ instanz }}</strong> ein</label><input class="input{% if fehler %} is-err{% endif %}" id="instanz" name="name" autocomplete="off" value="{{ name }}" data-instanz="{{ instanz }}"{% if fehler %} aria-invalid="true" aria-describedby="instanz-err"{% endif %}></div>
+    {% if fehler %}<p class="field-err" id="instanz-err">{{ fehler }}</p>{% endif %}
+  </div>
+  <div class="wz-foot"><button type="submit" class="btn btn-danger btn-block" data-deinstallieren>{{ "Alles löschen und deinstallieren" if loeschen else "Deinstallieren" }}</button></div>
+</form>
+{% endblock %}

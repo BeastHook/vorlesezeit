@@ -7,12 +7,13 @@ jeder Datei einzeln (vorher nur in test_startup.py).
 
 from __future__ import annotations
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import create_app
+from app import create_app, update_hinweis
 from app.auth.tokens import create_magic_link_token
 from app.config import Config, load_config
 from app.db import create_db_engine, init_db, make_session_factory
@@ -45,6 +46,20 @@ REQUIRED_ENV = {
     # damit die Startwerte samt Passwoertern uebernommen werden.
     "CREDENTIALS_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
 }
+
+
+@pytest.fixture(autouse=True)
+def no_update_query(monkeypatch):
+    """Die Update-Abfrage geht in Tests nie ins Netz: jeder Test beginnt ohne
+    gemerkten Stand, GitHub antwortet mit 404 (zaehlt als gescheitert)."""
+    monkeypatch.setattr(
+        update_hinweis, "transport", httpx.MockTransport(lambda r: httpx.Response(404))
+    )
+    monkeypatch.setattr(update_hinweis, "_checked_at", None)
+    monkeypatch.setattr(update_hinweis, "_latest", None)
+    yield
+    if update_hinweis._thread is not None:
+        update_hinweis._thread.join(timeout=5)
 
 
 @pytest.fixture

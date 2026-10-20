@@ -2406,3 +2406,18 @@ def test_client_for_without_usable_konto_fails_without_http(db_session, config, 
     expected = "neu eingegeben" if konto == "neu_eingeben" else "kein tonies-Konto"
     assert expected in str(excinfo.value)
     assert calls == []
+
+
+def test_chapter_title_for_falls_back_to_tuerchen_with_day():
+    """R42: ohne Kapitelname, Auftrags- und Einreichungstitel heisst das
+    Kapitel "Türchen <Tag>"."""
+    from app.delivery.job import chapter_title_for
+
+    assert chapter_title_for(Beitrag(), Slot(day=7)) == "Türchen 7"
+
+
+def test_chapter_title_for_falls_back_to_tuerchen_without_slot():
+    """R42: ohne Titel und ohne Kalendertag heisst das Kapitel "Türchen"."""
+    from app.delivery.job import chapter_title_for
+
+    assert chapter_title_for(Beitrag(), None) == "Türchen"

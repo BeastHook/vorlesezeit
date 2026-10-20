@@ -211,7 +211,8 @@ neu eingeben. Einen Schlüsselwechsel über die Oberfläche gibt es nicht.
 ## Einrichtungslink
 
 Ist kein nutzbarer SMTP-Zugang da (keiner eingetragen, nicht entschlüsselbar,
-oder die letzte Mail scheiterte), kann der Admin keinen Magic Link bekommen.
+oder nach einer gescheiterten Mail scheitert auch die SMTP-Anmeldeprobe beim
+Start), kann der Admin keinen Magic Link bekommen.
 Dann schreibt die App **bei jedem Start** einen Einrichtungslink ins Log:
 
 ```
@@ -229,7 +230,8 @@ nie in den Chat kopieren, er ist bis zur Verwendung ein Admin-Zugang.
 
 `https://advent.<domain>/status` nennt unter `neu_eingeben` die Zugangsdaten,
 die die App nicht lesen kann: `smtp_password` bzw. `tonie_konto:<Nr.>`, nie
-Werte. Ist die Liste nicht leer, im Reiter **Setup** das SMTP-Passwort bzw.
+Werte. `neu_eingeben` erscheint nur für den angemeldeten Admin, sonst gilt der
+Warnbalken im Reiter **Setup**. Ist die Liste nicht leer, im Reiter **Setup** das SMTP-Passwort bzw.
 das Passwort des genannten tonies-Kontos neu eingeben und prüfen lassen.
 Läufe auf Tonies dieses Kontos scheitern bis dahin mit benanntem Grund
 (Verlaufseintrag und Meldung), ohne Anmeldeversuch. Ist SMTP betroffen, kommt
@@ -327,6 +329,130 @@ erzeugen (Name = Freund). Dann:
 Nach `widerrufen` den Brevo-Schlüssel im Dashboard löschen. Die Merkliste
 `~/.vorlesezeit/einladungen.json` enthält keine Geheimnisse.
 
+Die App des Freundes fragt höchstens einmal am Tag
+`https://api.github.com/repos/BeastHook/vorlesezeit/releases/latest` ab (nur
+lesen, ohne Zugangsdaten). GitHub sieht dabei die IP-Adresse der Instanz. Ist das
+neueste Release neuer als die laufende Version, zeigt jede Admin-Seite den Balken
+„Update verfügbar, öffne die Startdatei.". Die Abfrage startet erst beim ersten
+Admin-Seitenaufruf nach dem Start; der Balken erscheint ab dem nächsten Aufruf.
+Scheitert die Abfrage (kein Netz, Firmen-Proxy, GitHub nicht erreichbar), zeigt
+die App nichts und versucht es nach 24 Stunden erneut. Auch der Heimserver fragt
+so ab.
+
+## Installation beim Freund
+
+Der Freund braucht Docker Desktop (Mac, Windows) bzw. Docker (Linux, NAS),
+den Einladungscode und eine Startdatei aus `installer/start/`:
+
+| Gerät | Startdatei |
+|---|---|
+| Mac | `Vorlesezeit installieren.command` (Doppelklick) |
+| Windows | `Vorlesezeit installieren.bat` (Doppelklick) |
+| Linux, NAS | `install.sh` oder der Einzeiler unten |
+
+Einzeiler für Linux und NAS:
+
+    curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v0.4.0/installer/start/install.sh | sh
+
+Die Startdatei prüft Docker (fehlt es, öffnet sie die Downloadseite; läuft es
+nicht, startet sie es und wartet bis zu 2 Minuten), unter Windows auch WSL2.
+Sie legt `~/Vorlesezeit` (Windows `%USERPROFILE%\Vorlesezeit`) an und kopiert
+sich dorthin. Dann startet sie das Image
+`ghcr.io/beasthook/vorlesezeit-installer:<version>` mit `--rm`, Port nur auf
+`127.0.0.1` (erster freier ab 8099), Docker-Socket, Installationsordner unter
+`/install` und den Laufwerken nur lesend unter `/laufwerke` (`install.sh` per
+`--mount`, damit Laufwerksnamen mit `:` gehen; Pfade mit `"` überspringt es).
+Der Browser öffnet sich auf `http://127.0.0.1:<port>/?t=<token>`; ohne das
+Token antwortet der Assistent mit 404.
+
+Die `.bat` startet auch mit LF-Zeilenenden, etwa nach einem Download über
+`raw.githubusercontent.com`: sie schreibt zuerst eine Kopie mit CRLF nach
+`%TEMP%` und läuft als diese Kopie weiter. Auch die Kopie in
+`%USERPROFILE%\Vorlesezeit` hat damit CRLF.
+
+Der Assistent fragt in sieben Schritten: Gerät, Adresse (Einladungscode oder
+eigene Domain mit Tunnel-Token), Admin-Mail und Anzeigename, Mail (mit Code
+nur Anzeige, sonst Gmail, GMX, web.de oder Brevo mit Pflicht-Testmail),
+Sicherung, Zusammenfassung mit „Installieren“, Fertig mit Notfallblatt. Erst
+„Installieren“ schreibt `.env` (Rechte `0600`), `compose.yml` und
+`installation.json` in den Installationsordner. Nach dem ersten gesunden
+Start streicht er die SMTP-Startwerte aus der `.env`; sie liegen dann
+verschlüsselt in der Datenbank.
+
+Nach einem Fehlschlag führt „Zurück zur Zusammenfassung“ zu den Antworten.
+Ein neues „Installieren“ schreibt eine vorhandene `.env` mit den neuen
+Antworten neu (Admin-Mail, Anzeigename, Tunnel-Token, Sicherungsziel, Mail).
+Die vier erzeugten Geheimnisse, `VORLESEZEIT_IMAGE` und `STORAGE_ACCESS_KEY`
+behält er, sonst passen Datenbank und Speicher nicht mehr. Sind die
+SMTP-Zeilen schon gestrichen, schreibt er keine zurück. Geänderte
+Mail-Antworten und Anzeigename wirken nach dem ersten Start der App nur noch
+im Reiter Setup, denn die App übernimmt sie nur beim ersten Start. Am Ende fordert er über `https://<host>/login` den Anmeldelink an
+die Admin-Mail an und beendet sich nach „Abschließen“.
+
+Ein erneuter Start mit `.env` und `"abgeschlossen": false` setzt bei
+„Installieren“ fort. Nach `"abgeschlossen": true` öffnet er die Wartung.
+
+### Wartung
+
+Einstieg ist ein erneuter Start der Startdatei: nach `"abgeschlossen": true`
+führt `/` nach `/wartung`. Die Übersicht prüft bei jedem Aufruf Version,
+„Vorlesezeit läuft“, „von außen erreichbar“, die letzte Sicherung (älter als
+36 h ist rot) und den freien Platz. Sie fragt einmal das neueste Release bei
+GitHub ab. Darunter stehen sechs Aufgaben:
+
+- **Aktualisieren:** (1) Sofort-Sicherung über
+  `compose exec -T backup python deploy/backup/backup.py --once`; scheitert
+  sie, ändert sich nichts. (2) `VORLESEZEIT_IMAGE` in der `.env` auf die neue
+  Version, `compose pull`, `compose up -d`. (3) Höchstens 180 s warten, bis
+  `app` gesund, der Tunnel verbunden und `https://<host>/status` 200 ist. Sonst
+  folgt ohne Rückfrage der Rückfall: alte Version in die `.env`,
+  `compose stop app scheduler backup`, die Datenbank samt `-wal`/`-shm` in
+  `<Name>.vor-rueckfall` umbenennen, den Stand aus Schritt 1 per
+  `backup.py restore` einspielen, `compose up -d`. Vom 1. bis 25.12.
+  (Europe/Berlin) ist Aktualisieren gesperrt, außer die erste Zeile der
+  Release-Notiz lautet `dringend: ja`. Der Vorgang schreibt seinen Stand vor
+  jedem Schritt nach `aktualisierung.json` im Installationsordner (ohne
+  Geheimnis). Ein neu gestarteter Assistent setzt dort fort; die 180 s zählen
+  ab dem gespeicherten Beginn von Schritt 3.
+- **Neu starten:** `compose stop`, `compose up -d`, dann dieselben Prüfungen
+  wie bei der Installation.
+- **Anmeldelink erzeugen:** `compose exec -T app python -m app.auth.anmeldelink`
+  erzeugt einen Einrichtungslink (24 h, einmal verwendbar, ältere offene Links
+  werden entwertet) und gibt nur den Pfad aus. Der Assistent zeigt ihn mit der
+  öffentlichen Adresse an und schreibt ihn in kein Log. Das geht erst ab einer
+  App-Version mit diesem Aufruf.
+- **Protokoll exportieren:** `compose logs` der letzten 7 Tage plus Adresse,
+  Version und die Namen der `.env`-Einträge als Textdatei. Geheimnisse,
+  `token=...` und `/einrichtung/<token>` sind vor dem Speichern geschwärzt.
+- **Notfallblatt herunterladen:** dasselbe PDF wie am Ende der Einrichtung.
+- **Deinstallieren:** ohne Haken `compose down --rmi all`; `.env`,
+  `compose.yml`, `installation.json`, Volumes und Sicherungen bleiben, und der
+  nächste Start läuft mit allem Bisherigen weiter. Mit Haken und eingetipptem
+  Instanznamen `compose down --volumes --rmi all`, dann den Ordner
+  `Vorlesezeit-Sicherung` bzw. `<Installationsordner>/Sicherung` und die
+  Dateien im Installationsordner löschen. Tunnel und DNS-Eintrag bei
+  Cloudflare bleiben.
+
+Es läuft höchstens ein Vorgang zugleich. Die Adventssperre gilt nur für
+Aktualisieren. Ohne Anfrage seit 30 Minuten und ohne laufenden Vorgang beendet
+sich der Assistent.
+
+Hürden beim ersten Öffnen, nicht wegzuautomatisieren (die Startdateien sind
+nicht signiert):
+
+- **Mac, Gatekeeper:** „kann nicht geöffnet werden“. In den
+  Systemeinstellungen unter Datenschutz & Sicherheit „Trotzdem öffnen“
+  wählen, dann die Datei noch einmal öffnen.
+- **Windows, SmartScreen:** „Der Computer wurde durch Windows geschützt“.
+  „Weitere Informationen“ und dann „Trotzdem ausführen“.
+
+Ein Gerät ohne Bildschirm (NAS) erreicht den Assistenten nur über einen
+SSH-Tunnel: `ssh -L <port>:127.0.0.1:<port> <gerät>`, dann die Adresse im
+eigenen Browser öffnen.
+
+Tests des Assistenten: `.venv/bin/pytest -q tests/test_installer*.py`
+(Docker, Netz und SMTP sind dort Fakes).
+
 ## Sicherung und Rücksicherung
 
 Jede Nacht um 00:30 (verpasste Läufe holt die Sicherung nach dem Aufwachen bzw.
@@ -358,7 +484,8 @@ Sicherung sofort auslösen:
 3. `ls <Ziel>/db/` und den gewünschten Stand wählen, dann
    `$DC run --rm --no-deps backup python deploy/backup/backup.py restore vorlesezeit-<UTC-Zeit>.db`
 4. `$DC up -d` und prüfen: Kalender sichtbar, eine Aufnahme spielt ab,
-   `/status` zeigt `neu_eingeben` leer. Ohne den alten `CREDENTIALS_KEY` sind
+   der Reiter **Setup** zeigt keinen Warnbalken bzw.
+   `/status` als angemeldeter Admin zeigt `neu_eingeben` leer. Ohne den alten `CREDENTIALS_KEY` sind
    alle Passwörter neu einzugeben (siehe „Zugangsdaten ‚neu eingeben‘“).
 
 Eine Rücksicherung wird vor der Inbetriebnahme einmal in einer

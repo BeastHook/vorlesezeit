@@ -181,6 +181,9 @@ class Beitrag(Base):
     # app/recording/routing.py::is_slot_open. Eine neue Aufnahme der
     # Person (R10) setzt das Feld wieder auf None.
     rejected_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Gesetzt zusammen mit rejected_at, wenn die Freigabe zurueckgenommen
+    # wurde -- nur fuer die Bezeichnung in der Admin-Flaeche.
+    withdrawn_at: Mapped[datetime | None] = mapped_column(default=None)
     # R35 (U8): Zeitpunkt, zu dem eine Neuzuweisung den Beitrag vom Slot
     # geloest hat. Unterscheidet einen verwaisten Beitrag (slot_id None,
     # detached_at gesetzt -- nie ausgeliefert, nicht im Eingang) von einer

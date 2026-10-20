@@ -1,0 +1,26 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf, technik %}
+{% block kopfzeilen %}{% if not fehler %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block title %}Installieren{% endblock %}
+{% block content %}
+{{ kopf(6, "Installieren") }}
+<h1 class="wz-q">Vorlesezeit wird eingerichtet</h1>
+<ul class="wz-checks" aria-live="polite">
+  {% for z in zeilen %}
+  {% set ic = {"ok": "ok", "fehler": "err", "laeuft": "run", "wartet": "wait"}[z.zustand] %}
+  <li{% if z.zustand == "fehler" %} class="is-err"{% elif z.zustand == "wartet" %} class="is-wait"{% endif %}><span class="wz-ic {{ ic }}" aria-hidden="true">{% if z.zustand == "ok" %}✓{% elif z.zustand == "fehler" %}{{ '!' if z.meta else '✗' }}{% endif %}</span><span class="txt">{{ z.text }}{% if z.meta %}<span class="meta">{{ z.meta }}</span>{% endif %}</span></li>
+  {% endfor %}
+</ul>
+{% if fehler %}
+<div class="flash err wz-flash" role="alert">{{ fehler.satz }}</div>
+{{ technik(fehler.technik) }}
+<form method="post" action="/installieren/wiederholen">
+  <div class="wz-foot">
+    <button type="submit" class="btn btn-primary btn-block">{{ fehler.knopf }}</button>
+    <a class="btn btn-ghost" href="/zusammenfassung">Zurück zur Zusammenfassung</a>
+  </div>
+</form>
+{% else %}
+<p class="note wz-abstand">Fenster versehentlich geschlossen? Öffne die Startdatei noch einmal, es geht hier weiter.</p>
+{% endif %}
+{% endblock %}

@@ -8,6 +8,7 @@ Test scenarios aus dem Plan:
 
 from __future__ import annotations
 
+import gc
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -42,8 +43,14 @@ def test_status_reports_uptime_right_after_start(configured_env):
 def test_status_uptime_truncates_full_seconds(configured_env):
     app = create_app()
     with TestClient(app) as client:
-        app.state.started_at -= 42.5
-        body = client.get("/status").json()
+        # Eine volle Garbage Collection dauert in der ganzen Suite ueber zwei
+        # Sekunden und darf nicht zwischen Zurueckstellen und Anfrage fallen.
+        gc.disable()
+        try:
+            app.state.started_at -= 42.5
+            body = client.get("/status").json()
+        finally:
+            gc.enable()
 
     assert body["uptime_seconds"] == 42
 

@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import update_hinweis
 from app.admin.state import SELECTION_KEY, Selection, chosen_value, current_selection, selections
 from app.auth.tokens import create_magic_link_token
 from app.delivery.trigger import evening_of, get_now
@@ -122,6 +123,7 @@ def _switcher(request: Request) -> dict | None:
 
 
 def render(request: Request, name: str, context: dict, *, tab: str | None) -> HTMLResponse:
+    update_hinweis.anstossen()
     return templates.TemplateResponse(
         request,
         name,
@@ -131,6 +133,7 @@ def render(request: Request, name: str, context: dict, *, tab: str | None) -> HT
             "tab": tab,
             "switcher": _switcher(request) if tab else None,
             "flash": request.session.pop("admin_flash", None),
+            "update_verfuegbar": update_hinweis.update_verfuegbar(),
         },
     )
 

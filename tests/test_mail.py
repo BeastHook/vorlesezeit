@@ -30,7 +30,7 @@ from app.mail import smtp as smtp_module
 from app.mail.magic_link import send_invitation_mail, send_magic_link_mail
 from app.mail.rejection import send_rejection_mail
 from app.mail.reminder import send_reminder_mail
-from app.mail.smtp import SmtpNichtEingerichtet, check_smtp, send_message
+from app.mail.smtp import SmtpNichtEingerichtet, check_smtp, probe_login, send_message
 from tests.conftest import REQUIRED_ENV
 from tests.mailutil import html_text, plain_text
 
@@ -51,6 +51,7 @@ class FakeSMTP:
         self.starttls_context = None
         self.logins: list[tuple[str, str]] = []
         self.sent: list[EmailMessage] = []
+        self.sendmails: list[tuple] = []
         FakeSMTP.instances.append(self)
 
     def __enter__(self):
@@ -70,12 +71,16 @@ class FakeSMTP:
     def send_message(self, message) -> None:
         self.sent.append(message)
 
+    def sendmail(self, *args) -> None:
+        self.sendmails.append(args)
+
 
 @pytest.fixture
 def fake_smtp(monkeypatch):
     FakeSMTP.instances = []
     FakeSMTP.fail_login = False
     monkeypatch.setattr("smtplib.SMTP", FakeSMTP)
+    monkeypatch.setattr("smtplib.SMTP_SSL", FakeSMTP)
     return FakeSMTP
 
 
@@ -333,6 +338,42 @@ def test_no_password_in_mail_texts_or_logs(seeded, config, fake_smtp, caplog):
         assert WRONG_PW not in text
 
 
+# --- Anmeldeprobe beim Start (R30, Einrichtungslink) -------------------------
+
+
+@pytest.mark.parametrize("port", [587, 465])
+def test_probe_logs_in_without_sending(fake_smtp, port):
+    assert probe_login("smtp.anders.example", port, "neu", SMTP_PW) is True
+
+    [conn] = fake_smtp.instances
+    assert (conn.host, conn.port) == ("smtp.anders.example", port)
+    assert conn.timeout == smtp_module.SMTP_TIMEOUT_SECONDS
+    assert conn.logins == [("neu", SMTP_PW)]
+    assert conn.sent == [] and conn.sendmails == []
+    if port == 587:
+        assert isinstance(conn.starttls_context, ssl.SSLContext)
+
+
+def test_probe_fails_on_auth_error(fake_smtp, caplog):
+    fake_smtp.fail_login = True
+
+    with caplog.at_level(logging.DEBUG):
+        assert probe_login("smtp.anders.example", 587, "neu", WRONG_PW) is False
+
+    assert fake_smtp.instances[0].sent == []
+    for secret in (WRONG_PW, "neu@", "authentication failed"):
+        assert secret not in caplog.text
+
+
+def test_probe_fails_on_os_error(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise ConnectionRefusedError("verbindung abgelehnt")
+
+    monkeypatch.setattr("smtplib.SMTP", refuse)
+
+    assert probe_login("smtp.anders.example", 587, "neu", SMTP_PW) is False
+
+
 # --- Advent-Design: neuer Wortlaut + HTML-Fassung (Task 8) ------------------
 
 
@@ -486,3 +527,40 @@ def test_reminder_thanks_for_reading_to_child(seeded, config, fake_smtp):
     message = fake_smtp.instances[0].sent[0]
     assert "Danke, dass du für Emma vorliest!" in plain_text(message)
     assert "Danke, dass du für Emma vorliest!" in html_text(message)
+
+
+# --- Reply-To (One-Klick-Setup Baustein 3, Antworten an den Admin) ---------
+
+
+def test_family_mail_replies_go_to_admin_and_admin_mail_has_no_reply_to(seeded, config, fake_smtp):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.delivery.job import DeliveryOutcome
+    from app.mail.report import send_report_mail
+
+    send_reminder_mail(
+        config,
+        session=seeded,
+        to_address="klaus@example.test",
+        display_name="Klaus",
+        open_days=[3],
+        login_url="https://x/l",
+    )
+    outcome = DeliveryOutcome(
+        success=False,
+        run_type="vorabend",
+        target_day=3,
+        used_beitrag_id=None,
+        used_replacement=False,
+        reason="Test",
+    )
+    send_report_mail(config, sessionmaker(bind=seeded.get_bind()), outcome)
+    send_magic_link_mail(
+        config, session=seeded, to_address="Admin@Example.test", login_url="https://x/l"
+    )
+
+    erinnerung, meldung, eigener_link = (conn.sent[0] for conn in fake_smtp.instances)
+    assert erinnerung["Reply-To"] == "admin@example.test"
+    assert meldung["To"] == "admin@example.test"
+    assert meldung["Reply-To"] is None
+    assert eigener_link["Reply-To"] is None

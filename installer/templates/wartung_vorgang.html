@@ -1,0 +1,13 @@
+{% extends "_wartung.html" %}
+{% from "_kopf.html" import aufgabe, checks, technik as technik_block, hauptknopf %}
+{% block kopfzeilen %}{% if laeuft %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+{{ aufgabe(name, zurueck=not laeuft) }}
+<h1 class="wz-q">{{ ueberschrift }}</h1>
+{{ checks(zeilen, live=laeuft) }}
+{% if meldung %}<div class="flash {{ 'ok' if meldung.ok else 'err' }} wz-flash" role="{{ 'status' if meldung.ok else 'alert' }}">{{ meldung.satz }}</div>{% endif %}
+{% if technik %}{{ technik_block(technik) }}{% endif %}
+{% if hinweis %}<p class="note wz-abstand">{{ hinweis }}</p>{% endif %}
+{% if knopf %}{{ hauptknopf(knopf) }}{% endif %}
+{% endblock %}

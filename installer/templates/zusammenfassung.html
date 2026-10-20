@@ -1,0 +1,20 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf %}
+{% block title %}Installieren{% endblock %}
+{% block content %}
+{{ kopf(6, "Installieren", "/sicherung") }}
+<h1 class="wz-q">Alles beisammen. Jetzt installieren?</h1>
+<ul class="wz-sum">
+  <li><span class="txt"><span class="k">Adresse</span>{{ a.host }}</span><a class="btn btn-ghost" href="/adresse">Ändern</a></li>
+  <li><span class="txt"><span class="k">Du</span>{% if a.anzeigename %}{{ a.anzeigename }}, {% endif %}{{ a.admin_email }}</span><a class="btn btn-ghost" href="/du">Ändern</a></li>
+  <li><span class="txt"><span class="k">Mails kommen von</span>{{ a.mail.absender }}</span><a class="btn btn-ghost" href="/mail">Ändern</a></li>
+  <li><span class="txt"><span class="k">Sicherung</span>{{ a.sicherung.name }}</span><a class="btn btn-ghost" href="/sicherung">Ändern</a></li>
+  <li><span class="txt"><span class="k">Gerät</span>{{ geraet }}</span><a class="btn btn-ghost" href="/geraet">Ansehen</a></li>
+</ul>
+<form method="post" action="/installieren">
+  <div class="wz-foot">
+    <button type="submit" class="btn btn-primary btn-block">Installieren</button>
+    <p class="note">Dauert etwa 5 Minuten. Lass den Rechner so lange an.</p>
+  </div>
+</form>
+{% endblock %}

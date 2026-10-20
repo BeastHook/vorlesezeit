@@ -257,6 +257,7 @@ def reject_beitrag(
             "Freigegebene Aufnahmen lassen sich nicht ablehnen. Erst die Freigabe zurücknehmen."
         )
     beitrag.rejected_at = _utcnow()
+    beitrag.withdrawn_at = None
     session.flush()
     return beitrag
 
@@ -273,6 +274,7 @@ def withdraw_approval(
     if beitrag.auftrag is not None:
         _ensure_unlocked(session, beitrag.auftrag, now=now, delivery_time=delivery_time)
         beitrag.rejected_at = _utcnow()
+        beitrag.withdrawn_at = beitrag.rejected_at
     beitrag.approved_at = None
     session.flush()
     return beitrag

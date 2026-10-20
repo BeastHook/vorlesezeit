@@ -42,7 +42,7 @@
   <form class="panel" method="post" action="/admin/campaign/replacement">
     <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
     <div class="panel-kicker">Ersatzbeitrag (R21) · {{ campaign.name }}</div>
-    <div class="panel-title">{% if replacement_label %}„{{ replacement_label }}"{% else %}keiner hinterlegt{% endif %}</div>
+    <div class="panel-title">{% if replacement_label %}„{{ replacement_label }}“{% else %}keiner hinterlegt{% endif %}</div>
     <p>Greift, wenn für den Folgetag nichts freigegeben ist oder die Verarbeitung den Tagesbeitrag verwirft.</p>
     {% if deliverable %}
     <div class="field">

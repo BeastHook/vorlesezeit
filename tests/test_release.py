@@ -21,3 +21,19 @@ def test_workflow_prueft_tag_gegen_version_und_baut_beide_architekturen():
     assert "linux/amd64,linux/arm64" in text
     assert "needs: test" in text
     assert ":latest" not in text and "type=raw,value=latest" not in text
+
+
+def test_workflow_baut_das_installer_image_fuer_beide_architekturen():
+    text = (ROOT / ".github/workflows/release.yml").read_text()
+    job = text.split("  installer-image:", 1)[1]
+    assert "needs: test" in job
+    assert "ghcr.io/${{ github.repository_owner }}/vorlesezeit-installer" in job
+    assert "file: installer/Dockerfile" in job
+    assert "linux/amd64,linux/arm64" in job
+    assert "flavor: latest=false" in job
+    assert ":latest" not in text and "type=raw,value=latest" not in text
+
+
+def test_workflow_prueft_auch_das_installer_paket():
+    text = (ROOT / ".github/workflows/release.yml").read_text()
+    assert "ruff format --check app tests scripts installer" in text

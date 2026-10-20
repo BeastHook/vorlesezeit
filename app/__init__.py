@@ -178,17 +178,27 @@ def create_app() -> FastAPI:
         return await http_exception_handler(request, exc)
 
     @app.get("/status")
-    def status() -> dict[str, object]:
-        # R21: nur die Namen der neu einzugebenden Zugangsdaten, nie Werte.
-        with app.state.session_factory() as session:
-            neu_eingeben = settings.needs_reentry(session)
-        return {
+    def status(request: Request) -> dict[str, object]:
+        body: dict[str, object] = {
             "status": "ok",
             "version": __version__,
             "timezone": app.state.config.timezone,
-            "neu_eingeben": neu_eingeben,
             "uptime_seconds": int(time.monotonic() - app.state.started_at),
         }
+        # R21: nur die Namen der neu einzugebenden Zugangsdaten, nie Werte,
+        # und nur fuer den angemeldeten Admin. Dieselbe Regel wie
+        # get_current_person/require_admin, aber ohne Umleitung: der
+        # Health-Check ruft /status ohne Anmeldung auf.
+        person_id = request.session.get("person_id")
+        with app.state.session_factory() as session:
+            person = session.get(Person, person_id) if person_id is not None else None
+            if (
+                person is not None
+                and person.access_version == request.session.get("access_version")
+                and person.is_admin
+            ):
+                body["neu_eingeben"] = settings.needs_reentry(session)
+        return body
 
     @app.get("/robots.txt", response_class=PlainTextResponse)
     def robots_txt() -> str:

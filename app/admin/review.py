@@ -69,6 +69,7 @@ _TAG_CLASSES = {
     "eingereicht": "tag",
     "freigegeben": "tag tag-accent-2",
     "abgelehnt": "tag tag-outline",
+    "zurueckgenommen": "tag tag-outline",
     "ausgeliefert": "tag tag-strong",
 }
 
@@ -467,6 +468,7 @@ def freigeben(
             return _back(beitrag.id)
     beitrag.approved_at = _utcnow()
     beitrag.rejected_at = None
+    beitrag.withdrawn_at = None
     db.commit()
     flash(request, "Freigegeben.")
     return _back(beitrag.id, stamp=True)

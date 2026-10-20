@@ -20,9 +20,10 @@ from sqlalchemy.orm import Session
 
 from app import create_app
 from app import settings as st
+from app.auth.tokens import create_magic_link_token
 from app.config import ConfigError, load_config
 from app.db import init_db
-from app.models import CreativeTonie, Einstellungen, TonieKonto
+from app.models import CreativeTonie, Einstellungen, Person, TonieKonto
 from tests.conftest import REQUIRED_ENV
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -250,11 +251,19 @@ def test_reentry_flag_clears_when_key_matches_again(engine, tmp_path):
         assert st.needs_reentry(s) == []
 
 
+def _login_admin(client: TestClient) -> None:
+    with client.app.state.session_factory() as s:
+        admin = s.scalars(select(Person).where(Person.is_admin.is_(True))).one()
+        token = create_magic_link_token(load_config(), admin)
+    client.post("/login/confirm", data={"token": token})
+
+
 def test_status_names_affected_fields_without_values(configured_env, monkeypatch):
     with TestClient(create_app()):
         pass
     monkeypatch.setenv("CREDENTIALS_KEY", KEY_B)
     with TestClient(create_app()) as client:
+        _login_admin(client)
         response = client.get("/status")
     body = response.json()
     assert body["timezone"] == "Europe/Berlin"
@@ -263,12 +272,45 @@ def test_status_names_affected_fields_without_values(configured_env, monkeypatch
         assert secret not in response.text
 
 
+def test_status_without_login_hides_reentry_fields(configured_env, monkeypatch):
+    with TestClient(create_app()):
+        pass
+    monkeypatch.setenv("CREDENTIALS_KEY", KEY_B)
+    with TestClient(create_app()) as client:
+        _login_admin(client)
+        assert client.get("/status").json()["neu_eingeben"] != []
+        client.cookies.clear()
+        response = client.get("/status", follow_redirects=False)
+    assert response.status_code == 200
+    assert "neu_eingeben" not in response.json()
+    assert set(response.json()) == {"status", "version", "timezone", "uptime_seconds"}
+    assert "smtp_password" not in response.text
+    assert "tonie_konto" not in response.text
+
+
+def test_status_hides_reentry_fields_from_non_admin(person_client):
+    response = person_client.get("/status", follow_redirects=False)
+    assert response.status_code == 200
+    assert "neu_eingeben" not in response.json()
+
+
+def test_status_hides_reentry_fields_after_access_version_bump(admin_client, db_session):
+    assert "neu_eingeben" in admin_client.get("/status").json()
+    admin = db_session.scalars(select(Person).where(Person.is_admin.is_(True))).one()
+    admin.access_version += 1
+    db_session.commit()
+    response = admin_client.get("/status", follow_redirects=False)
+    assert response.status_code == 200
+    assert "neu_eingeben" not in response.json()
+
+
 def test_app_starts_without_smtp_tonie_and_key(configured_env, monkeypatch):
     for name in ("SMTP_HOST", "SMTP_PORT", "SMTPUSER", "SMTPPW", "SMTP_FROM_ADDRESS"):
         monkeypatch.delenv(name)
     for name in ("TONIE_USERNAME", "TONIE_PASSWORD", "CREDENTIALS_KEY"):
         monkeypatch.delenv(name)
     with TestClient(create_app()) as client:
+        _login_admin(client)
         body = client.get("/status").json()
     assert body["status"] == "ok"
     assert body["neu_eingeben"] == []
@@ -448,6 +490,7 @@ def test_seeded_konto_is_linked_to_migrated_tonie(configured_env, tmp_path, monk
     engine.dispose()
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "alt.db"))
     with TestClient(create_app()) as client:
+        _login_admin(client)
         assert client.get("/status").json()["neu_eingeben"] == []
     with Session(create_engine(f"sqlite:///{tmp_path / 'alt.db'}")) as s:
         tonie = s.scalars(select(CreativeTonie)).one()

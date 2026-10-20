@@ -43,6 +43,7 @@ BEITRAG_LABELS = {
     "eingereicht": "eingereicht",
     "freigegeben": "freigegeben",
     "abgelehnt": "abgelehnt",
+    "zurueckgenommen": "Freigabe zurückgenommen",
 }
 
 _OUTCOME_TO_KEY = {"erfolg": "ausgeliefert", "ersatzbeitrag": "ersatz", "fehlschlag": "fehlschlag"}
@@ -337,7 +338,7 @@ def slot_state(
 
 def beitrag_state(beitrag: Beitrag) -> BeitragState:
     if beitrag.rejected_at is not None:
-        key = "abgelehnt"
+        key = "zurueckgenommen" if beitrag.withdrawn_at is not None else "abgelehnt"
     elif beitrag.approved_at is not None:
         key = "freigegeben"
     else:

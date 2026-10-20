@@ -457,3 +457,15 @@ def test_new_person_columns_added_to_existing_db(tmp_path):
 
     assert "reminded_at" in _columns(engine, "persons")
     assert "hoechste_person_id" in _columns(engine, "einstellungen")
+
+
+def test_withdrawn_at_column_added_to_existing_db(tmp_path):
+    """Admin-Anzeigefehler (2026-10-17): additive Spalte fuer die Ruecknahme."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'ohne-ruecknahme.db'}")
+    init_db(engine)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("ALTER TABLE beitraege DROP COLUMN withdrawn_at")
+
+    init_db(engine)
+
+    assert "withdrawn_at" in _columns(engine, "beitraege")

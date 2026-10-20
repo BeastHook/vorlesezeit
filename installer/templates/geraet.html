@@ -1,0 +1,45 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf, technik %}
+{% block title %}Gerät{% endblock %}
+{% block content %}
+{{ kopf(1, "Gerät") }}
+<h1 class="wz-q">Passt dieser Rechner für Vorlesezeit?</h1>
+<p class="lead">Vorlesezeit läuft hier jeden Abend von allein, auch wenn niemand davor sitzt. Wir haben kurz nachgesehen.</p>
+<ul class="wz-checks">
+  {% for z in zeilen %}
+  <li{% if not z.ok %} class="is-err"{% endif %}><span class="wz-ic {{ 'ok' if z.ok else 'err' }}" aria-hidden="true">{{ '✓' if z.ok else '✗' }}</span><span class="txt">{{ z.titel }}<span class="meta">{{ z.meta }}</span></span></li>
+  {% endfor %}
+</ul>
+{% if hart %}
+<div class="flash err wz-flash" role="alert">
+  {% if offline %}<strong>Dieser Rechner kommt nicht ins Internet.</strong> Prüf die Verbindung und prüf dann noch einmal.
+  {% else %}<strong>Auf diesem Gerät läuft Vorlesezeit nicht.</strong> Die rot markierten Punkte zeigen, woran es liegt.{% endif %}
+</div>
+{% elif proxy %}
+<div class="flash err wz-flash" role="alert">
+  <strong>Dieses Gerät eignet sich nicht, ein Firmen-Proxy liest mit.</strong> Nimm bitte einen privaten Rechner, der nicht von einer Firma verwaltet wird.
+</div>
+{{ technik('login.tonies.com: Zertifikat ausgestellt von\n"' ~ aussteller ~ '" (erwartet: öffentlicher Aussteller)\nDas Familienpasswort für tonies würde über den Proxy laufen.') }}
+{% endif %}
+<form method="post" action="/geraet">
+  <h2 class="wz-sec">Bitte einmal einstellen</h2>
+  <p class="meta">Damit Vorlesezeit auch nach einem Stromausfall oder Neustart wieder läuft. Hake ab, was erledigt ist.</p>
+  <ul class="wz-todo">
+    {% for p in punkte %}
+    <li><label><input type="checkbox" class="checkbox" name="erledigt" value="{{ p.id }}"{% if p.id in erledigt %} checked{% endif %}><span>{{ p.titel }}<span class="meta">{{ p.meta }}</span></span></label>
+      <details><summary>So geht’s</summary><img class="wz-bild" src="/assistent/bilder/{{ host_os }}-{{ p.id }}.svg" alt="Schema: {{ p.bild }}" width="360" height="180"></details></li>
+    {% endfor %}
+  </ul>
+  <div class="wz-foot">
+    {% if hart %}
+    <a class="btn btn-secondary btn-block" href="/geraet">Erneut prüfen</a>
+    {% elif proxy %}
+    <a class="btn btn-secondary btn-block" href="/geraet">Erneut prüfen</a>
+    <button type="submit" name="aktion" value="trotzdem" class="btn btn-ghost">Trotzdem weiter (nicht empfohlen)</button>
+    {% else %}
+    <button type="submit" name="aktion" value="weiter" class="btn btn-primary btn-block">Weiter</button>
+    <p class="note">Noch nicht alles abgehakt? Du kannst trotzdem weiter. Die offenen Punkte stehen in der Zusammenfassung.</p>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

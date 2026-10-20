@@ -3,6 +3,7 @@ Loeschen ohne Aufnahmen (2026-10-04)."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,6 +20,7 @@ from app.models import Auftrag, Beitrag, Person, Slot
 from app.settings import get_einstellungen, invitation_date, recording_deadline
 
 router = APIRouter(prefix="/admin")
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -177,7 +179,11 @@ def erinnern(
             open_days=open_days,
             login_url=login_url(request, person),
         )
-    except Exception:
+    except Exception as exc:
+        # R20: nur die Ausnahmeklasse, der Text traegt Adressen und Serverantworten.
+        logger.warning(
+            "Erinnerungs-Mail fehlgeschlagen: person=%s fehler=%s", person.id, type(exc).__name__
+        )
         flash(request, f"Erinnerung an {name} konnte nicht verschickt werden.", "err")
     else:
         person.reminded_at = berlin_now(request)
@@ -204,7 +210,10 @@ def einladen(
             to_address=person.email,
             login_url=login_url(request, person),
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Einladungs-Mail fehlgeschlagen: person=%s fehler=%s", person.id, type(exc).__name__
+        )
         flash(request, f"Einladung an {name} konnte nicht verschickt werden.", "err")
     else:
         if person.invited_at is None:

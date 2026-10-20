@@ -1,0 +1,29 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf, technik, meldung as zeige %}
+{% block title %}Mail{% endblock %}
+{% block content %}
+{{ kopf(4, "Mail", "/du") }}
+<h1 class="wz-q">Über welches Postfach sollen die Mails gehen?</h1>
+<form method="post" action="/mail">
+  <div class="wz-opts grid" role="radiogroup" aria-label="Mailanbieter">
+    {% for id, v in alle.items() %}
+    <label class="wz-opt"><input type="radio" name="anbieter" value="{{ id }}"{% if id == anbieter %} checked{% endif %} data-anbieter><span class="txt name">{{ v.name }}</span></label>
+    {% endfor %}
+  </div>
+  <div class="field wz-abstand"><label for="adresse">{{ a.login }}</label>
+    <input class="input" id="adresse" name="adresse" value="{{ adresse }}" autocomplete="off" spellcheck="false"></div>
+  <div class="field wz-feld"><label for="passwort">{{ a.passwort }}</label>
+    <input class="input{% if meldung and not meldung.ok %} is-err{% endif %}" id="passwort" name="passwort" type="password" autocomplete="off"{% if geprueft %} placeholder="gespeichert"{% endif %}></div>
+  {% if a.eigener_absender %}
+  <div class="field wz-feld"><label for="absender">Absenderadresse</label>
+    <input class="input" id="absender" name="absender" type="email" value="{{ absender }}" autocomplete="off"></div>
+  {% endif %}
+  <p class="meta">{{ a.hinweis }}{% if anbieter == "gmail" %} <a class="wz-link" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">So legst du es an</a>{% endif %}</p>
+  {% if not meldung or meldung.ok %}{{ technik("Server " ~ a.host ~ ", Port " ~ port ~ ", STARTTLS") }}{% endif %}
+  {{ zeige(meldung) }}
+  <div class="wz-foot">
+    <button type="submit" name="aktion" value="test" class="btn btn-secondary btn-block">Testmail schicken</button>
+    <button type="submit" name="aktion" value="weiter" class="btn btn-primary btn-block"{% if not geprueft %} disabled{% endif %}>Weiter</button>
+  </div>
+</form>
+{% endblock %}

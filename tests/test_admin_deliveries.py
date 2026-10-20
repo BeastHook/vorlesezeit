@@ -141,6 +141,16 @@ def test_page_shows_panels_and_r45_limit(admin_client, campaign):
     assert "Verlauf" in text
 
 
+def test_page_quotes_replacement_title_with_closing_quote(admin_client, db_session, campaign):
+    beitrag = make_free_beitrag(db_session, title="Sterne zählen")
+    campaign.replacement_beitrag_id = beitrag.id
+    db_session.commit()
+
+    text = admin_client.get("/admin/auslieferung").text
+
+    assert "„Sterne zählen · Uropa Willi“" in text
+
+
 def test_page_points_to_setup_when_no_tonie_linked(admin_client, db_session):
     db_session.add(Campaign())
     db_session.commit()

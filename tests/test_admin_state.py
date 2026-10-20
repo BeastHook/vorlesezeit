@@ -230,6 +230,16 @@ def test_beitrag_state_labels(db_session: Session):
     assert beitrag_state(b).key == "abgelehnt"
 
 
+def test_beitrag_state_withdrawn_approval(db_session: Session):
+    _, person = _setup(db_session)
+    b = _beitrag(db_session, person, None)
+    b.rejected_at = datetime(2026, 10, 3)
+    b.withdrawn_at = datetime(2026, 10, 3)
+    state = beitrag_state(b)
+    assert state.key == "zurueckgenommen"
+    assert state.label == "Freigabe zurückgenommen"
+
+
 # --- Mehrkalender U7: Festwerden je Kalender (KTD10) ------------------------------
 
 

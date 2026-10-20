@@ -82,6 +82,7 @@ _MEHRKALENDER_COLUMNS = [
     ("einstellungen", "kind_name", "VARCHAR"),
     ("persons", "reminded_at", "DATETIME"),
     ("einstellungen", "hoechste_person_id", "INTEGER"),
+    ("beitraege", "withdrawn_at", "DATETIME"),
 ]
 
 

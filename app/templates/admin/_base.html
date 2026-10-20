@@ -35,6 +35,7 @@
   {% endfor %}
 </nav>
 {% endif %}
+{% if update_verfuegbar %}<div class="flash ok" role="status" data-result="update">Update verfügbar, öffne die Startdatei.</div>{% endif %}
 {% if flash %}<div class="flash {{ flash.kind }}" role="status" data-result="{{ flash.kind }}">{{ flash.message }}</div>{% endif %}
 {% block content %}{% endblock %}
 </main>

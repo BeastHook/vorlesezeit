@@ -279,8 +279,8 @@ def chapter_title_for(beitrag: Beitrag, slot: Slot | None) -> str:
     if title := named_title(beitrag, slot):
         return title
     if slot is not None:
-        return f"Tuerchen {slot.day}"
-    return "Tuerchen"
+        return f"Türchen {slot.day}"
+    return "Türchen"
 
 
 def first_slot(beitrag: Beitrag) -> Slot | None:

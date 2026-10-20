@@ -1,0 +1,14 @@
+{% extends "_wartung.html" %}
+{% from "_kopf.html" import aufgabe %}
+{% block title %}Neu starten{% endblock %}
+{% block content %}
+{{ aufgabe("Neu starten") }}
+<h1 class="wz-q">Vorlesezeit neu starten?</h1>
+<p class="lead">Das hilft oft, wenn etwas hängt. Deine Daten bleiben, wie sie sind.</p>
+<form method="post" action="/wartung/neustart">
+  <div class="wz-foot">
+    <button type="submit" class="btn btn-primary btn-block">Neu starten</button>
+    <p class="note">Dauert etwa eine Minute. So lange ist Vorlesezeit nicht erreichbar.</p>
+  </div>
+</form>
+{% endblock %}

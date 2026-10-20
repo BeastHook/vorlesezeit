@@ -1,0 +1,28 @@
+{% extends "_wartung.html" %}
+{% from "_kopf.html" import checks, technik %}
+{% block title %}Wartung{% endblock %}
+{% block content %}
+<h1 class="wz-q">{{ ueberschrift }}</h1>
+{% if status.gesund and not status.probleme %}<p class="lead">Vorlesezeit läuft auf diesem Rechner unter <strong>{{ adresse }}</strong>.</p>{% endif %}
+{{ checks(status.zeilen, label="Status") }}
+{% if not status.gesund %}<div class="flash err wz-flash" role="alert">Vorlesezeit ist angehalten, vielleicht nach einem Stromausfall. Starte es neu.</div>{% endif %}
+{% if status.technik %}{{ technik(status.technik | join("\n")) }}{% endif %}
+{% if not status.gesund %}<div class="wz-foot"><a class="btn btn-primary btn-block" href="/wartung/neustart">Neu starten</a></div>{% endif %}
+{% if neu %}
+<div class="panel warm wz-abstand">
+  <div class="panel-kicker">Neue Version</div>
+  <div class="panel-title">Vorlesezeit {{ neu.version }} ist da</div>
+  <a class="btn btn-primary btn-block" href="/wartung/aktualisieren">Ansehen und aktualisieren</a>
+</div>
+{% endif %}
+<h2 class="wz-sec">Was möchtest du tun?</h2>
+<ul class="wz-menu">
+  <li><a href="/wartung/aktualisieren"><span class="txt"><span class="name">Aktualisieren</span><span class="meta">{{ "Du hast die neueste Version" if abfrage.release and not neu else "Neue Version einspielen" }}</span></span>{% if neu %}<span class="tag tag-accent-2">{{ neu.version }}</span>{% endif %}</a></li>
+  <li><a href="/wartung/neustart"><span class="txt"><span class="name">Neu starten</span><span class="meta">Hilft oft, wenn etwas hängt</span></span></a></li>
+  <li><a href="/wartung/anmeldelink"><span class="txt"><span class="name">Anmeldelink erzeugen</span><span class="meta">Falls du nicht mehr in den Admin-Bereich kommst</span></span></a></li>
+  <li><a href="/wartung/protokoll"><span class="txt"><span class="name">Protokoll exportieren</span><span class="meta">Für die Person, die dir hilft</span></span></a></li>
+  <li><a href="/wartung/notfallblatt"><span class="txt"><span class="name">Notfallblatt herunterladen</span><span class="meta">Zum Wiederherstellen nach einem Defekt</span></span></a></li>
+  <li><a href="/wartung/deinstallieren" class="is-danger"><span class="txt"><span class="name">Deinstallieren</span><span class="meta">Vorlesezeit von diesem Rechner entfernen</span></span></a></li>
+</ul>
+<p class="note wz-abstand">Fertig? Schließ einfach dieses Fenster. Vorlesezeit läuft weiter.</p>
+{% endblock %}

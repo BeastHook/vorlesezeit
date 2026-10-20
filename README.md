@@ -69,6 +69,35 @@ Reiter für alles Weitere.
 
 ---
 
+## Installieren mit Einladungscode (One-Klick-Setup)
+
+Für Freund:innen, die von uns einen Einladungscode (`VZ1-…`) bekommen haben. Die eigene
+Adresse `<name>.vorlesezeit.app` und der Mailversand sind darin schon enthalten.
+
+1. **Docker Desktop installieren** ([Mac, Windows](https://www.docker.com/products/docker-desktop/)).
+   Unter Linux oder auf einem NAS genügt Docker.
+2. **Startdatei herunterladen** – im neuesten [Release](https://github.com/BeastHook/vorlesezeit/releases/latest)
+   unter „Assets“:
+   - Mac: `Vorlesezeit-installieren-Mac.zip` entpacken, dann `Vorlesezeit installieren.command`
+   - Windows: `Vorlesezeit installieren.bat`
+   - Linux/NAS: `install.sh`, oder direkt im Terminal
+     `curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v<version>/installer/start/install.sh | sh`
+3. **Doppelklick auf die Startdatei.** Beim ersten Mal warnt das System, weil die Datei nicht signiert ist:
+   - Mac: Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem öffnen“, dann die Datei noch einmal öffnen.
+   - Windows: „Weitere Informationen“ → „Trotzdem ausführen“.
+4. **Im Browser dem Assistenten folgen.** Er fragt in sieben Schritten nach Gerät, Einladungscode,
+   deiner Mailadresse, Sicherungsziel und installiert dann alles selbst.
+5. **Notfallblatt aufheben.** Am Ende gibt es ein PDF mit Adresse und Wiederherstellungsschlüssel.
+   Gut aufbewahren, ohne den Schlüssel lassen sich gespeicherte Zugangsdaten nicht wiederherstellen.
+6. **Anmelden.** Der Anmeldelink kommt per Mail an die angegebene Adresse. Danach im Reiter
+   **Setup** das tonies-Konto eintragen.
+
+Der Computer muss im Advent abends laufen, sonst kommt die Geschichte nicht auf den Tonie.
+Technische Details (was die Startdatei genau tut, Neustart nach einem Fehlschlag, NAS ohne
+Bildschirm): [`docs/betrieb.md`](docs/betrieb.md#installation-beim-freund).
+
+---
+
 ## Selbst betreiben
 
 Vorlesezeit läuft als kleiner Docker-Compose-Stack: App, Objektspeicher (versitygw), Zeitplan

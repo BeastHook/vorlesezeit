@@ -1,0 +1,9 @@
+<div id="code-status" data-ok="{{ 1 if status.ok else 0 }}">
+{% if status.ok %}
+  <p class="field-state"><span class="tag tag-accent-2">✓ Code passt</span></p>
+  <div class="wz-addr">Deine Adresse wird<strong>{{ status.host }}</strong></div>
+{% else %}
+  <p class="field-err" id="code-err">{{ status.meldung }}</p>
+  {% if status.technik %}<details class="wz-tech"><summary>Technische Einzelheiten</summary><pre>{{ status.technik }}</pre></details>{% endif %}
+{% endif %}
+</div>

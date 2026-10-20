@@ -1,0 +1,45 @@
+{% extends "_wartung.html" %}
+{% from "_kopf.html" import aufgabe, technik %}
+{% block title %}Aktualisieren{% endblock %}
+{% block content %}
+{{ aufgabe("Aktualisieren") }}
+{% if abfrage.release is none %}
+<h1 class="wz-q">Gibt es eine neue Version?</h1>
+<div class="flash err wz-flash" role="alert">Gerade lässt sich nicht nachsehen. Prüf die Internetverbindung und versuch es noch einmal.</div>
+{{ technik("GET " ~ releases_url ~ ": " ~ abfrage.grund) }}
+<form method="get" action="/wartung/aktualisieren"><div class="wz-foot"><button type="submit" class="btn btn-primary btn-block">Noch einmal nachsehen</button><p class="note">{{ hinweis }}</p></div></form>
+{% elif not neu %}
+<h1 class="wz-q">Du hast die neueste Version</h1>
+<p class="wz-version"><span>{{ alt }}</span></p>
+<p class="meta">Zuletzt nachgesehen: {{ zeit }}</p>
+<div class="wz-foot"><a class="btn btn-primary btn-block" href="/wartung">Zur Übersicht</a><p class="note">{{ hinweis }}</p></div>
+{% elif gesperrt %}
+<h1 class="wz-q">Im Advent wird nicht aktualisiert</h1>
+<p class="wz-version"><span class="alt">{{ alt }}</span><span aria-hidden="true">→</span><span>{{ neu.version }}</span></p>
+<p>Bis zum 25. Dezember bleibt Vorlesezeit, wie es ist, damit jeden Abend die Geschichte kommt. Ab dem 26. Dezember kannst du aktualisieren.</p>
+<div class="wz-foot"><button type="button" class="btn btn-primary btn-block" disabled>Ab 26. Dezember möglich</button><p class="note">{{ hinweis }}</p></div>
+{% else %}
+<h1 class="wz-q">{{ "Ein wichtiges Update ist da" if neu.dringend else "Eine neue Version ist da" }}</h1>
+<p class="wz-version"><span class="alt">{{ alt }}</span><span aria-hidden="true">→</span><span>{{ neu.version }}</span>{% if neu.dringend %}<span class="tag tag-warn">dringend</span>{% endif %}</p>
+{% if neu.notizen %}
+<div class="panel">
+  <div class="panel-kicker">Was ist neu</div>
+  <ul class="wz-notes">
+    {% for punkt in neu.notizen %}<li>{{ punkt }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% if neu.dringend and advent %}
+<p class="wz-abstand">Im Advent wird sonst nicht aktualisiert. Dieses Update behebt einen Fehler, deshalb geht es trotzdem.</p>
+{% else %}
+<p class="wz-abstand">Vorher wird automatisch gesichert. Klappt etwas nicht, geht Vorlesezeit von selbst auf {{ alt }} zurück.</p>
+{% endif %}
+<form method="post" action="/wartung/aktualisieren">
+  <div class="wz-foot">
+    <button type="submit" class="btn btn-primary btn-block">Jetzt aktualisieren</button>
+    <p class="note">Dauert etwa 5 Minuten. So lange ist Vorlesezeit nicht erreichbar. {{ hinweis }}</p>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

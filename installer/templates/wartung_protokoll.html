@@ -1,0 +1,19 @@
+{% extends "_wartung.html" %}
+{% from "_kopf.html" import aufgabe %}
+{% block title %}Protokoll{% endblock %}
+{% block content %}
+{{ aufgabe("Protokoll") }}
+<h1 class="wz-q">Protokoll für die Fehlersuche</h1>
+{% if geladen %}
+<div class="flash ok wz-flash" role="status">Gespeichert im Download-Ordner: {{ geladen.datei }}</div>
+<details class="wz-tech"><summary>So sieht es aus</summary><pre>{{ geladen.vorschau }}</pre></details>
+<div class="wz-foot"><a class="btn btn-secondary btn-block" href="/wartung/protokoll/herunterladen" download="{{ datei }}">Noch einmal herunterladen</a></div>
+{% else %}
+<p class="lead">Darin steht, was Vorlesezeit in den letzten 7 Tagen getan hat. Schick die Datei an die Person, die dir hilft.</p>
+<ul class="wz-checks">
+  <li><span class="wz-ic ok" aria-hidden="true">✓</span><span class="txt">Passwörter und Schlüssel sind geschwärzt</span></li>
+  <li><span class="wz-ic ok" aria-hidden="true">✓</span><span class="txt">Anmeldelinks sind geschwärzt</span></li>
+</ul>
+<div class="wz-foot"><a class="btn btn-primary btn-block" href="/wartung/protokoll/herunterladen" download="{{ datei }}">Protokoll herunterladen</a></div>
+{% endif %}
+{% endblock %}

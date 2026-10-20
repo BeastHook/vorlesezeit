@@ -1,0 +1,17 @@
+{% extends "_base.html" %}
+{% from "_kopf.html" import kopf %}
+{% block title %}Mail{% endblock %}
+{% block content %}
+{{ kopf(4, "Mail", "/du") }}
+<h1 class="wz-q">Von wem kommen die Mails?</h1>
+<p class="lead">Hier ist nichts zu tun. Der Mailversand kam mit deinem Einladungscode.</p>
+<div class="panel">
+  <div class="panel-kicker">Absender</div>
+  {% if name %}<div class="panel-title">{{ name }}</div>{% endif %}
+  <div class="wz-umbruch">{{ absender }}</div>
+</div>
+<p class="meta wz-abstand">Antworten gehen an {{ admin }}</p>
+<form method="post" action="/mail">
+  <div class="wz-foot"><button type="submit" name="aktion" value="weiter" class="btn btn-primary btn-block">Weiter</button></div>
+</form>
+{% endblock %}

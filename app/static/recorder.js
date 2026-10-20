@@ -20,11 +20,23 @@
     states[el.dataset.state] = el;
   });
 
+  // Lauftext-Knopf (docs/design/lauftext-start-mockup.html): nur beim
+  // Vorlesen und Aufnehmen sichtbar, nie bei "Eigene Geschichte".
+  const scrollToggle = root.querySelector("[data-role='scroll-toggle']");
+  let currentState = null;
+  let ownStory = false;
+  function updateScrollToggle() {
+    if (!scrollToggle) return;
+    scrollToggle.hidden = ownStory || (currentState !== "idle" && currentState !== "recording");
+  }
+
   function showState(name) {
     Object.values(states).forEach((el) => {
       el.hidden = true;
     });
     if (states[name]) states[name].hidden = false;
+    currentState = name;
+    updateScrollToggle();
   }
 
   // --- Vorschlag vorlesen / Eigene Geschichte (R24, AE17, AE18) ---
@@ -38,6 +50,8 @@
       const own = btn.dataset.choice === "own";
       if (storyWrap) storyWrap.hidden = own;
       if (titleField) titleField.hidden = !own;
+      ownStory = own;
+      updateScrollToggle();
     });
   });
 
@@ -53,6 +67,7 @@
   // Text stand bei niedrigen Werten still.
   let scrollPos = 0;
   let lastFrame = null;
+  let scrollFrame = null;
 
   function scrollTick(now) {
     const speed = Number(speedSlider.value) || 0;
@@ -65,10 +80,23 @@
       scrollPos = storyScroll.scrollTop;
     }
     lastFrame = now;
-    requestAnimationFrame(scrollTick);
+    scrollFrame = requestAnimationFrame(scrollTick);
   }
-  if (storyScroll && speedSlider) {
-    requestAnimationFrame(scrollTick);
+  // Der Lauftext steht beim Laden still und laeuft nur per eigenem Knopf,
+  // unabhaengig von der Aufnahme.
+  if (scrollToggle && storyScroll && speedSlider) {
+    scrollToggle.addEventListener("click", () => {
+      const running = scrollFrame === null;
+      if (running) {
+        scrollFrame = requestAnimationFrame(scrollTick);
+      } else {
+        cancelAnimationFrame(scrollFrame);
+        scrollFrame = null;
+        lastFrame = null;
+      }
+      scrollToggle.setAttribute("aria-pressed", String(running));
+      scrollToggle.setAttribute("aria-label", running ? "Lauftext anhalten" : "Lauftext starten");
+    });
   }
   if (fontSlider && storyText) {
     fontSlider.addEventListener("input", () => {
@@ -480,6 +508,24 @@
   rerecordButtons.forEach((btn) => btn.addEventListener("click", resetRecording));
   submitBtns.forEach((btn) => btn.addEventListener("click", submitRecording));
   if (retryBtn) retryBtn.addEventListener("click", submitRecording);
+
+  // Datei hochladen statt aufnehmen: die gewaehlte Datei laeuft wie eine
+  // Aufnahme ueber submitRecording (gleicher Endpunkt, Fortschritt, failed).
+  const fileInput = root.querySelector("[data-role='file-input']");
+  const uploadBtn = root.querySelector("[data-role='upload-btn']");
+  if (fileInput && uploadBtn) {
+    fileInput.addEventListener("change", () => {
+      uploadBtn.disabled = fileInput.files.length === 0;
+    });
+    uploadBtn.addEventListener("click", () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      recordedBlob = file;
+      reportedType = file.type;
+      setupPreview();
+      submitRecording();
+    });
+  }
 
   // R31: Unterbrechung durch Sichtbarkeitswechsel (Bildschirmsperre, Anruf,
   // App-Wechsel) erkennen und die Sperre danach neu anfordern.

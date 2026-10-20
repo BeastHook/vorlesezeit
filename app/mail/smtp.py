@@ -2,14 +2,17 @@
 
 Mehrkalender U5 (KTD7/KTD17): der Zugang kommt aus dem Einstellungsdienst, nicht
 aus der Umgebung. Jeder Versand haelt fest, ob er scheiterte (`mail_failed_at`,
-R30) -- daran haengt der Einrichtungslink beim naechsten Start. TLS immer mit
-`ssl.create_default_context()` (Zertifikat und Hostname geprueft).
+R30). Ist das gesetzt, meldet sich der naechste Start per `probe_login` an
+(ohne Mail); erst wenn auch das scheitert, entsteht der Einrichtungslink. TLS
+immer mit `ssl.create_default_context()` (Zertifikat und Hostname geprueft).
 """
 
 from __future__ import annotations
 
 import smtplib
 import ssl
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
@@ -42,17 +45,34 @@ class SmtpPruefung:
     grund: str | None = None  # nie mit Passwort oder Serverantwort (R20)
 
 
-def _deliver(host: str, port: int, user: str, password: str, message: EmailMessage) -> None:
+@contextmanager
+def _logged_in(host: str, port: int, user: str, password: str) -> Iterator[smtplib.SMTP]:
     context = ssl.create_default_context()
     if port == 465:
         with smtplib.SMTP_SSL(host, port, timeout=SMTP_TIMEOUT_SECONDS, context=context) as client:
             client.login(user, password)
-            client.send_message(message)
+            yield client
     else:
         with smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT_SECONDS) as client:
             client.starttls(context=context)
             client.login(user, password)
-            client.send_message(message)
+            yield client
+
+
+def _deliver(host: str, port: int, user: str, password: str, message: EmailMessage) -> None:
+    with _logged_in(host, port, user, password) as client:
+        client.send_message(message)
+
+
+def probe_login(host: str, port: int, user: str, password: str) -> bool:
+    """R30: verbinden, TLS, anmelden -- keine Mail, nichts gespeichert, nichts
+    geloggt (R20). Jeder SMTP- oder Netzfehler gilt als gescheitert."""
+    try:
+        with _logged_in(host, port, user, password):
+            pass
+    except (smtplib.SMTPException, OSError):
+        return False
+    return True
 
 
 def gruss(sender_name: str | None) -> str:
@@ -64,7 +84,8 @@ def gruss(sender_name: str | None) -> str:
 
 def send_message(config: Config, session: Session, message: EmailMessage) -> None:
     """Versand ueber den gespeicherten Zugang. Setzt den Absender (mit dem
-    Anzeigenamen des Admins, R26). Erfolg loescht `mail_failed_at`; Anmelde-
+    Anzeigenamen des Admins, R26) und fuer jeden Empfaenger ausser dem Admin
+    `Reply-To` auf die Admin-Mail. Erfolg loescht `mail_failed_at`; Anmelde-
     oder Verbindungsfehler setzen es und werden weitergereicht. Ein vom
     Server abgelehnter Empfaenger betrifft nur diese Adresse, nicht den Zugang."""
     zugang = settings.smtp_zugang(session, config.credentials_key)
@@ -73,6 +94,12 @@ def send_message(config: Config, session: Session, message: EmailMessage) -> Non
     name = settings.admin_display_name(session)
     del message["From"]
     message["From"] = formataddr((name, zugang.from_address)) if name else zugang.from_address
+    # Antworten der Familie landen beim Admin, nicht beim Absender (oft
+    # <name>@vorlesezeit.app ohne eigenes Postfach). Mails an den Admin selbst
+    # bekommen keins.
+    del message["Reply-To"]
+    if message["To"].strip().lower() != config.admin_email.strip().lower():
+        message["Reply-To"] = config.admin_email
 
     row = settings.get_einstellungen(session)
     try:
