@@ -1,0 +1,10 @@
+{% extends "mail/_base.html" %}{% from "mail/_base.html" import knopf %}
+{% block body %}
+<p style="margin:0 0 12px">{{ greeting }}</p>
+<p style="margin:0 0 12px">gestern war deine Geschichte{% if title %} „{{ title }}“{% endif %} auf dem Tonie{% if kind %} für {{ kind }}{% endif %}. Ab heute kannst du sie im Archiv nachhören, zusammen mit allen Geschichten, die schon dran waren.</p>
+<p style="margin:0 0 4px">Über diesen Link kommst du direkt ins Archiv:</p>
+{{ knopf(archiv_url, "Zum Archiv") }}
+<p style="margin:0 0 12px">Danke, dass du dabei bist!</p>
+<p style="margin:16px 0 0;white-space:pre-line">{{ gruss }}</p>
+<p style="margin:18px 0 0;font-size:12px;color:#6b5b48;word-break:break-all">Falls der Knopf nicht geht: {{ archiv_url }}</p>
+{% endblock %}

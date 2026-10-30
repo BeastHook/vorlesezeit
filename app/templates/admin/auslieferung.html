@@ -63,6 +63,12 @@
     {% if space %}
     <div class="panel-title" data-result="ok">Frei: {{ space.free_minutes }}</div>
     <p>Bestand: {{ space.stock_count }} Kapitel, {{ space.stock_minutes }}</p>
+    {% if space.rahmen_minutes %}
+    <p>Rahmen dieses Kalenders: {{ space.rahmen_minutes }}, in jeder Länge eingerechnet.</p>
+    {% endif %}
+    {% if space.rahmen_error %}
+    <p>Der Rahmen dieses Kalenders lässt sich nicht bauen. Der Lauf liefert dann ohne Rahmen.</p>
+    {% endif %}
     {% if space.too_long %}
     <p><strong>Diese Beiträge passen nicht hinein:</strong> {{ space.too_long|join(", ") }}</p>
     {% else %}

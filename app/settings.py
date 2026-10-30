@@ -21,6 +21,7 @@ CREDENTIALS_KEY, ohne Schluessel gibt es keinen (KTD5).
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import logging
 from dataclasses import dataclass, field
@@ -29,6 +30,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.datastructures import URL
 
 from app.config import (
     DEFAULT_DELIVERY_TIME,
@@ -38,7 +40,7 @@ from app.config import (
     check_delivery_time,
 )
 from app.crypto import CredentialsUnavailable, decrypt, encrypt, fingerprint, key_usable
-from app.models import CreativeTonie, Einstellungen, TonieKonto
+from app.models import Campaign, CreativeTonie, Einstellungen, TonieKonto
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +320,11 @@ def kind_name(session: Session) -> str | None:
     return get_einstellungen(session).kind_name
 
 
+def calendar_kind_name(session: Session, campaign: Campaign) -> str:
+    """Advent-Anreicherung KTD8: der Kindername des Kalenders, sonst der instanzweite."""
+    return (campaign.kind_name or "").strip() or (kind_name(session) or "").strip()
+
+
 def smtp_zugang(session: Session, key: str | None) -> SmtpZugang | None:
     """Vollstaendiger SMTP-Zugang mit Klartext-Passwort, nur fuer den Versand.
     None, wenn unvollstaendig oder "neu eingeben" (dann ohne Anmeldeversuch, R21)."""
@@ -389,6 +396,21 @@ def set_value(session: Session, name: str, value: Any, *, now: datetime) -> None
     _mark_setup(data, name, now)
     _save_herkunft(row, data)
     session.commit()
+
+
+def remember_public_address(session: Session, url: URL) -> bool:
+    """KTD9: die erste https-Adresse mit echtem Hostnamen, ueber die der Admin
+    die App oeffnet, wird die Basis fuer spaetere Anmeldelinks. Nie ueberschrieben."""
+    row = get_einstellungen(session)
+    if row.oeffentliche_adresse or url.scheme != "https" or "." not in (url.hostname or ""):
+        return False
+    try:
+        ipaddress.ip_address(url.hostname)
+    except ValueError:
+        row.oeffentliche_adresse = f"{url.scheme}://{url.netloc}"
+        session.commit()
+        return True
+    return False
 
 
 def _window_open(session: Session, now: datetime) -> date | None:

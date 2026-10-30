@@ -1,0 +1,11 @@
+{{ greeting }}
+
+gestern war deine Geschichte{% if title %} „{{ title }}“{% endif %} auf dem Tonie{% if kind %} für {{ kind }}{% endif %}. Ab heute kannst du sie im Archiv nachhören, zusammen mit allen Geschichten, die schon dran waren.
+
+Über diesen Link kommst du direkt ins Archiv:
+
+{{ archiv_url }}
+
+Danke, dass du dabei bist!
+
+{{ gruss }}

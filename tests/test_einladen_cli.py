@@ -10,7 +10,9 @@ import pytest
 from app.einladungscode import Einladung, EinladungscodeError, decode, encode
 from scripts.einladen import cli
 from scripts.einladen.cli import EinladenError, liste, neu, pruefe_name, widerrufen
-from scripts.einladen.cloudflare import CloudflareError, DnsEintrag
+from scripts.einladen.cloudflare import CloudflareError, DnsEintrag, Mailregel, Zieladresse
+
+ADMIN = "freund@example.org"
 
 
 class FakeCloudflare:
@@ -18,6 +20,9 @@ class FakeCloudflare:
         self.dns: dict[str, DnsEintrag] = {}
         self.tunnel: dict[str, dict] = {}
         self.geraete: dict[str, int] = {}
+        self.adressen: list[Zieladresse] = [Zieladresse("a0", ADMIN, True)]
+        self.regeln: dict[str, Mailregel] = {}
+        self.aenderungen: list[str] = []
         self.scheitert: set[str] = set()
         self._n = 0
 
@@ -32,7 +37,29 @@ class FakeCloudflare:
     def dns_eintraege(self, name):
         return [e for e in self.dns.values() if e.name == name]
 
+    def zieladressen(self):
+        self._pruefe("zieladressen")
+        return list(self.adressen)
+
+    def mailregeln(self):
+        self._pruefe("mailregeln")
+        return list(self.regeln.values())
+
+    def mailregel_anlegen(self, adresse, ziel):
+        self.aenderungen.append("mailregel_anlegen")
+        self._pruefe("mailregel_anlegen")
+        mid = self._id("m")
+        self.regeln[mid] = Mailregel(mid, adresse, (ziel,))
+        # Cloudflare hat die Regel schon angelegt, die Antwort geht verloren.
+        self._pruefe("mailregel_anlegen_nach_anlage")
+        return mid
+
+    def mailregel_loeschen(self, regel_id):
+        self._pruefe("mailregel_loeschen")
+        del self.regeln[regel_id]
+
     def tunnel_anlegen(self, name):
+        self.aenderungen.append("tunnel_anlegen")
         self._pruefe("tunnel_anlegen")
         tid = self._id("t")
         self.tunnel[tid] = {"name": name, "host": None}
@@ -83,6 +110,7 @@ def _schluessel(_prompt):
 def test_neu_legt_tunnel_weiterleitung_und_cname_an(cf, merkliste):
     code = neu(
         "mueller",
+        ADMIN,
         cf=cf,
         merkliste=merkliste,
         smtp_login="login@smtp-brevo.com",
@@ -100,18 +128,24 @@ def test_neu_legt_tunnel_weiterleitung_und_cname_an(cf, merkliste):
     assert einladung.smtp.user == "login@smtp-brevo.com"
     assert einladung.smtp.key == "xsmtpsib-fake"
     assert einladung.smtp.absender == "mueller@vorlesezeit.app"
+    [regel] = cf.regeln.values()
+    assert (regel.an, regel.ziele) == ("mueller@vorlesezeit.app", (ADMIN,))
 
 
 def test_merkliste_ohne_geheimnisse(cf, merkliste):
-    code = neu("mueller", cf=cf, merkliste=merkliste, smtp_login="l", frage_schluessel=_schluessel)
+    code = neu(
+        "mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login="l", frage_schluessel=_schluessel
+    )
     text = merkliste.read_text()
     eintrag = json.loads(text)["mueller"]
-    assert set(eintrag) == {"host", "tunnel_id", "dns_id", "angelegt"}
+    assert set(eintrag) == {"host", "tunnel_id", "dns_id", "admin_mail", "regel_id", "angelegt"}
+    assert eintrag["admin_mail"] == ADMIN
+    assert eintrag["regel_id"] in cf.regeln
     assert "token-" not in text and "xsmtpsib" not in text and code not in text
 
 
 def test_name_wird_klein_geschrieben(cf, merkliste):
-    neu("Mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+    neu("Mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     assert "mueller" in json.loads(merkliste.read_text())
 
 
@@ -130,6 +164,7 @@ def test_bestehender_eintrag_jedes_typs_verhindert_alles(cf, merkliste, typ):
     with pytest.raises(EinladenError, match="schon belegt"):
         neu(
             "mueller",
+            ADMIN,
             cf=cf,
             merkliste=merkliste,
             smtp_login="l",
@@ -141,10 +176,10 @@ def test_bestehender_eintrag_jedes_typs_verhindert_alles(cf, merkliste, typ):
 
 
 def test_doppelter_name_in_der_merkliste(cf, merkliste):
-    neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+    neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     cf.dns.clear()
     with pytest.raises(EinladenError, match="gibt es schon"):
-        neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+        neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
 
 
 def test_abbruch_beim_schluessel_legt_nichts_an(cf, merkliste):
@@ -152,13 +187,13 @@ def test_abbruch_beim_schluessel_legt_nichts_an(cf, merkliste):
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        neu("mueller", cf=cf, merkliste=merkliste, smtp_login="l", frage_schluessel=abbruch)
+        neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login="l", frage_schluessel=abbruch)
     assert cf.tunnel == {} and cf.dns == {} and not merkliste.exists()
 
 
 def test_leerer_schluessel_heisst_ohne_mail(cf, merkliste):
     code = neu(
-        "mueller", cf=cf, merkliste=merkliste, smtp_login="l", frage_schluessel=lambda p: " "
+        "mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login="l", frage_schluessel=lambda p: " "
     )
     assert decode(code).smtp is None
 
@@ -166,6 +201,7 @@ def test_leerer_schluessel_heisst_ohne_mail(cf, merkliste):
 def test_ohne_smtp_login_keine_frage(cf, merkliste):
     code = neu(
         "mueller",
+        ADMIN,
         cf=cf,
         merkliste=merkliste,
         smtp_login=None,
@@ -174,25 +210,34 @@ def test_ohne_smtp_login_keine_frage(cf, merkliste):
     assert decode(code).smtp is None
 
 
-@pytest.mark.parametrize("schritt", ["weiterleitung_setzen", "cname_anlegen", "tunnel_token"])
+@pytest.mark.parametrize(
+    "schritt",
+    [
+        "weiterleitung_setzen",
+        "cname_anlegen",
+        "mailregel_anlegen",
+        "mailregel_anlegen_nach_anlage",
+        "tunnel_token",
+    ],
+)
 def test_fehler_nach_dem_tunnel_raeumt_alles_ab(cf, merkliste, schritt):
     cf.scheitert.add(schritt)
     with pytest.raises(CloudflareError):
-        neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
-    assert cf.tunnel == {} and cf.dns == {} and not merkliste.exists()
+        neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
+    assert cf.tunnel == {} and cf.dns == {} and cf.regeln == {} and not merkliste.exists()
 
 
 def test_cname_angelegt_aber_antwort_verloren_wird_abgeraeumt(cf, merkliste):
     cf.scheitert.add("cname_anlegen_nach_anlage")
     with pytest.raises(CloudflareError):
-        neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+        neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     assert cf.dns == {} and cf.tunnel == {} and not merkliste.exists()
 
 
 def test_scheitert_dns_abraeumen_wird_tunnel_trotzdem_geloescht(cf, merkliste, capsys):
     cf.scheitert.update({"tunnel_token", "dns_loeschen"})
     with pytest.raises(CloudflareError, match="tunnel_token: kaputt"):
-        neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+        neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     assert cf.tunnel == {}
     assert "mueller.vorlesezeit.app" in capsys.readouterr().err
 
@@ -200,14 +245,14 @@ def test_scheitert_dns_abraeumen_wird_tunnel_trotzdem_geloescht(cf, merkliste, c
 def test_scheitert_tunnel_abraeumen_bleibt_der_urspruengliche_fehler(cf, merkliste, capsys):
     cf.scheitert.update({"tunnel_token", "tunnel_loeschen"})
     with pytest.raises(CloudflareError, match="tunnel_token: kaputt"):
-        neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+        neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     assert cf.dns == {}
     assert "vorlesezeit-mueller" in capsys.readouterr().err
 
 
 def test_liste_zeigt_verbindungen_und_warnt_bei_mehreren(cf, merkliste):
     for name in ("anna", "ben", "carl"):
-        neu(name, cf=cf, merkliste=merkliste, smtp_login=None)
+        neu(name, ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     ids = {n: e["tunnel_id"] for n, e in json.loads(merkliste.read_text()).items()}
     cf.geraete[ids["ben"]] = 1
     cf.geraete[ids["carl"]] = 2
@@ -223,7 +268,7 @@ def test_liste_leer(cf, merkliste):
 
 
 def test_widerrufen_loescht_nur_eigenes(cf, merkliste):
-    neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+    neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     cf.dns["txt"] = DnsEintrag("txt", "TXT", "mueller.vorlesezeit.app", "fremd")
     cf.dns["adv"] = DnsEintrag("adv", "CNAME", "advent.vorlesezeit.app", "x.cfargotunnel.com")
     widerrufen("mueller", cf=cf, merkliste=merkliste)
@@ -233,7 +278,7 @@ def test_widerrufen_loescht_nur_eigenes(cf, merkliste):
 
 
 def test_widerrufen_bei_aktiver_verbindung_ist_wiederholbar(cf, merkliste):
-    neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+    neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     cf.scheitert.add("tunnel_loeschen")
     with pytest.raises(CloudflareError):
         widerrufen("mueller", cf=cf, merkliste=merkliste)
@@ -258,7 +303,7 @@ def test_main_ohne_umgebung_nennt_nur_namen(monkeypatch, capsys):
 
 
 def test_main_widerrufen_bei_aktiver_verbindung_ohne_traceback(cf, merkliste, monkeypatch, capsys):
-    neu("mueller", cf=cf, merkliste=merkliste, smtp_login=None)
+    neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
     cf.scheitert.add("tunnel_loeschen")
     monkeypatch.setattr(cli, "_cloudflare", lambda: cf)
     monkeypatch.setattr(cli, "MERKLISTE", merkliste)
@@ -313,3 +358,141 @@ def test_testen_ohne_antwort_meldet_fehlschlag_und_stoppt():
     )
     assert ok is False
     assert aufrufe[-1][:2] == ["docker", "stop"]
+
+
+def test_fremde_mailregeln_bleiben_beim_abraeumen(cf, merkliste):
+    cf.regeln["fremd"] = Mailregel("fremd", "advent@vorlesezeit.app", (ADMIN,))
+    cf.scheitert.add("tunnel_token")
+    with pytest.raises(CloudflareError):
+        neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
+    assert set(cf.regeln) == {"fremd"}
+
+
+def test_scheitert_mailregel_abraeumen_wird_der_rest_trotzdem_abgeraeumt(cf, merkliste, capsys):
+    cf.scheitert.update({"tunnel_token", "mailregel_loeschen"})
+    with pytest.raises(CloudflareError, match="tunnel_token: kaputt"):
+        neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
+    assert cf.tunnel == {} and cf.dns == {}
+    assert "Mailregel mueller@vorlesezeit.app" in capsys.readouterr().err
+
+
+def _neu_mit_frage(cf, merkliste, admin=ADMIN):
+    gefragt = []
+    neu(
+        "mueller",
+        admin,
+        cf=cf,
+        merkliste=merkliste,
+        smtp_login="l",
+        frage_schluessel=lambda p: gefragt.append(p) or "k",
+    )
+    return gefragt
+
+
+def test_fehlende_zieladresse_bricht_vor_jeder_aenderung_ab(cf, merkliste):
+    cf.adressen = [Zieladresse("a1", "jemand@example.org", True)]
+    with pytest.raises(EinladenError, match="fehlt in Cloudflare") as exc:
+        _neu_mit_frage(cf, merkliste)
+    assert ADMIN in str(exc.value)
+    assert cf.aenderungen == [] and not merkliste.exists()
+
+
+def test_unbestaetigte_zieladresse_bricht_vor_jeder_aenderung_ab(cf, merkliste):
+    cf.adressen = [Zieladresse("a0", ADMIN, False)]
+    with pytest.raises(EinladenError, match="nicht bestätigt") as exc:
+        _neu_mit_frage(cf, merkliste)
+    assert ADMIN in str(exc.value)
+    assert cf.aenderungen == [] and not merkliste.exists()
+
+
+def test_zieladresse_ohne_ruecksicht_auf_gross_und_kleinschreibung(cf, merkliste):
+    cf.adressen = [Zieladresse("a0", "Freund@Example.org", True)]
+    _neu_mit_frage(cf, merkliste, admin=" freund@example.ORG ")
+    [regel] = cf.regeln.values()
+    assert regel.ziele == ("freund@example.org",)
+
+
+def test_zieladresse_wird_vor_dem_schluessel_geprueft(cf, merkliste):
+    cf.adressen = []
+    gefragt = []
+    with pytest.raises(EinladenError):
+        neu(
+            "mueller",
+            ADMIN,
+            cf=cf,
+            merkliste=merkliste,
+            smtp_login="l",
+            frage_schluessel=lambda p: gefragt.append(p) or "k",
+        )
+    assert gefragt == []
+
+
+@pytest.mark.parametrize("admin", ["", "  ", "kein-at-zeichen", "a@", "@b.de", "a b@c.de"])
+def test_unzulaessige_admin_mail(cf, merkliste, admin):
+    with pytest.raises(EinladenError, match="Admin-Mail"):
+        _neu_mit_frage(cf, merkliste, admin=admin)
+    assert cf.aenderungen == []
+
+
+def test_bestehende_mailregel_verhindert_alles(cf, merkliste):
+    cf.regeln["alt"] = Mailregel("alt", "mueller@vorlesezeit.app", ("jemand@example.org",))
+    with pytest.raises(EinladenError, match="schon eine Mailregel"):
+        _neu_mit_frage(cf, merkliste)
+    assert cf.aenderungen == [] and set(cf.regeln) == {"alt"}
+
+
+def test_widerrufen_entfernt_nur_die_eigene_mailregel(cf, merkliste):
+    neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
+    cf.regeln["adv"] = Mailregel("adv", "advent@vorlesezeit.app", (ADMIN,))
+    cf.regeln["um"] = Mailregel("um", "mueller@vorlesezeit.app", ("anders@example.org",))
+    widerrufen("mueller", cf=cf, merkliste=merkliste)
+    assert set(cf.regeln) == {"adv", "um"}
+    assert json.loads(merkliste.read_text()) == {}
+
+
+def test_widerrufen_alter_eintrag_ohne_admin_mail(cf, merkliste):
+    neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
+    daten = json.loads(merkliste.read_text())
+    del daten["mueller"]["admin_mail"], daten["mueller"]["regel_id"]
+    merkliste.write_text(json.dumps(daten))
+    cf.regeln.clear()
+    cf.scheitert.add("mailregeln")
+    widerrufen("mueller", cf=cf, merkliste=merkliste)
+    assert cf.tunnel == {} and json.loads(merkliste.read_text()) == {}
+
+
+def test_widerrufen_scheitert_mailregel_bleibt_wiederholbar(cf, merkliste):
+    neu("mueller", ADMIN, cf=cf, merkliste=merkliste, smtp_login=None)
+    cf.scheitert.add("mailregel_loeschen")
+    with pytest.raises(CloudflareError):
+        widerrufen("mueller", cf=cf, merkliste=merkliste)
+    assert "mueller" in json.loads(merkliste.read_text())
+    cf.scheitert.clear()
+    widerrufen("mueller", cf=cf, merkliste=merkliste)
+    assert cf.regeln == {} and cf.tunnel == {} and json.loads(merkliste.read_text()) == {}
+
+
+def test_main_neu_verlangt_admin_mail(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["neu", "mueller"])
+    assert exc.value.code == 2
+    assert "admin_mail" in capsys.readouterr().err
+
+
+def test_main_neu_reicht_admin_mail_durch(cf, merkliste, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_cloudflare", lambda: cf)
+    monkeypatch.setattr(cli, "MERKLISTE", merkliste)
+    monkeypatch.delenv("BREVO_SMTP_LOGIN", raising=False)
+    assert cli.main(["neu", "mueller", ADMIN]) == 0
+    [regel] = cf.regeln.values()
+    assert regel.ziele == (ADMIN,)
+    assert "VZ1-" in capsys.readouterr().out
+
+
+def test_main_neu_ohne_zieladresse_meldet_klar(cf, merkliste, monkeypatch, capsys):
+    cf.adressen = []
+    monkeypatch.setattr(cli, "_cloudflare", lambda: cf)
+    monkeypatch.setattr(cli, "MERKLISTE", merkliste)
+    assert cli.main(["neu", "mueller", ADMIN]) == 1
+    err = capsys.readouterr().err
+    assert "fehlt in Cloudflare" in err and "Traceback" not in err

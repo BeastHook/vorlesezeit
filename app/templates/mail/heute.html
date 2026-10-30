@@ -1,0 +1,8 @@
+{% extends "mail/_base.html" %}
+{% block body %}
+<p style="margin:0 0 12px">{{ greeting }}</p>
+<p style="margin:0 0 12px">heute Morgen wartet auf dem Tonie{% if kind %} für {{ kind }}{% endif %} deine Geschichte{% if title %} „{{ title }}“{% endif %}.</p>
+<p style="margin:0 0 12px">Danke, dass du vorgelesen hast, {% if kind %}das wird {{ kind }} freuen{% else %}das wird eine Freude{% endif %}!</p>
+<p style="margin:0 0 12px">Ab morgen früh kannst du sie im Archiv nachhören, zusammen mit den Geschichten der anderen.</p>
+<p style="margin:16px 0 0;white-space:pre-line">{{ gruss }}</p>
+{% endblock %}

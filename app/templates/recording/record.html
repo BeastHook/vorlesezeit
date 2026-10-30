@@ -55,7 +55,6 @@
     <section data-state="idle" hidden>
       <button type="button" class="rec-btn idle" data-role="record-btn">Aufnehmen</button>
       <p class="rec-hint">Lies in Ruhe vor. Du kannst dir alles anhören und so oft neu aufnehmen, wie du magst.</p>
-      {% if auftrag %}
       <details class="setup-details upload-details">
         <summary class="upload-toggle" aria-label="Oder eine fertige Datei hochladen">
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4l-5 5h3.2v6h3.6V9H17zM5 17.5h14v2.5H5z" fill="currentColor"/></svg>
@@ -66,7 +65,6 @@
           <button type="button" class="btn btn-secondary" data-role="upload-btn" disabled>Hochladen</button>
         </div>
       </details>
-      {% endif %}
     </section>
 
     <section data-state="recording" hidden>

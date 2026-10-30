@@ -42,7 +42,9 @@ services:
 
   app:
     build: .
-    image: vorlesezeit-heimserver
+    # Ohne VORLESEZEIT_IMAGE das aus dem Checkout gebaute Image; mit ihm ein
+    # Release-Image von ghcr.io, gesetzt von "deploy/heimserver.sh update".
+    image: ${VORLESEZEIT_IMAGE:-vorlesezeit-heimserver}
     restart: unless-stopped
     depends_on:
       s3:
@@ -98,7 +100,7 @@ services:
 
   # KTD14: bewusst dumm, ruft nur im Takt auf; Faelligkeit entscheidet die App.
   scheduler:
-    image: vorlesezeit-heimserver
+    image: ${VORLESEZEIT_IMAGE:-vorlesezeit-heimserver}
     command: ["python", "deploy/scheduler/scheduler.py"]
     restart: unless-stopped
     depends_on:
@@ -108,7 +110,7 @@ services:
 
   # KTD19: naechtliche Sicherung auf das zweite Medium (BACKUP_TARGET_PATH).
   backup:
-    image: vorlesezeit-heimserver
+    image: ${VORLESEZEIT_IMAGE:-vorlesezeit-heimserver}
     command: ["python", "deploy/backup/backup.py"]
     restart: unless-stopped
     depends_on:

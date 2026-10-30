@@ -22,7 +22,10 @@ from app.admin.common import (
 )
 from app.admin.setup import (
     add_calendar_day,
+    auftrag_kind_name,
+    begruessung,
     create_auftrag,
+    insert_begruessung,
     reassign_auftrag,
     remove_calendar_day,
     update_auftrag,
@@ -322,6 +325,18 @@ def _person_id(raw: str) -> int | None:
     return int(raw) if raw.strip() else None
 
 
+def _old_greeting_note(db: Session, auftrag: Auftrag, previous: Person | None) -> str:
+    """R21: nach einem Wechsel zu einer anderen Person der Hinweis, wenn der
+    Text noch mit der Begruessung der bisherigen beginnt."""
+    if previous is None or auftrag.person_id in (None, previous.id):
+        return ""
+    name = previous.display_name.strip()
+    greeting = begruessung(auftrag_kind_name(db, auftrag), name)
+    if not name or not (auftrag.vorlesetext or "").startswith(greeting):
+        return ""
+    return f" Der Vorlesetext beginnt noch mit der Begrüßung von {name}."
+
+
 @router.post("/geschichten/{slot_id}", response_class=HTMLResponse)
 def save_geschichte(
     slot_id: int,
@@ -341,17 +356,21 @@ def save_geschichte(
     new_person_id = _person_id(person_id)
     title, vorlesetext = title.strip(), vorlesetext.strip()
 
-    detached = []
+    detached, note = [], ""
     try:
         if slot.auftrag is None:
             if new_person_id is not None or title or vorlesetext:
                 auftrag = create_auftrag(db, person_id=new_person_id)
                 add_calendar_day(db, auftrag.id, slot.id, **when)
                 update_auftrag(db, auftrag.id, title=title, vorlesetext=vorlesetext)
+                insert_begruessung(db, auftrag)
         else:
             auftrag = slot.auftrag
+            previous = auftrag.person
             detached = reassign_auftrag(db, auftrag.id, new_person_id, **when)
             update_auftrag(db, auftrag.id, title=title, vorlesetext=vorlesetext)
+            insert_begruessung(db, auftrag)
+            note = _old_greeting_note(db, auftrag, previous)
     except ValueError as exc:  # AuftragError und unbekannte Person
         db.rollback()
         flash(request, str(exc), "err")
@@ -359,9 +378,9 @@ def save_geschichte(
     db.commit()
 
     if detached:
-        flash(request, f"Gespeichert. {DETACH_WARNING}")
+        flash(request, f"Gespeichert. {DETACH_WARNING}{note}")
     else:
-        flash(request, "Geschichte gespeichert.")
+        flash(request, f"Geschichte gespeichert.{note}")
     return redirect(f"/admin/geschichten?slot_id={slot_id}")
 
 
@@ -393,6 +412,7 @@ def new_auftrag(
             title=title.strip(),
             vorlesetext=vorlesetext.strip(),
         )
+        insert_begruessung(db, auftrag)
     except ValueError as exc:
         db.rollback()
         flash(request, str(exc), "err")
@@ -415,15 +435,19 @@ def save_auftrag(
     """Person (R12/R35, gesperrt nach festem Tag), Titel und Vorlesetext --
     die beiden letzten bleiben nach der Auslieferung aenderbar (Abnahme)."""
     auftrag = _auftrag_or_404(db, auftrag_id)
+    previous = auftrag.person
     try:
         detached = reassign_auftrag(db, auftrag.id, _person_id(person_id), **_when(request, db))
         update_auftrag(db, auftrag.id, title=title.strip(), vorlesetext=vorlesetext.strip())
+        insert_begruessung(db, auftrag)
+        note = _old_greeting_note(db, auftrag, previous)
     except ValueError as exc:
         db.rollback()
         flash(request, str(exc), "err")
         return _back_to(auftrag_id)
     db.commit()
-    flash(request, f"Gespeichert. {DETACH_WARNING}" if detached else "Auftrag gespeichert.")
+    message = f"Gespeichert. {DETACH_WARNING}" if detached else "Auftrag gespeichert."
+    flash(request, f"{message}{note}")
     return _back_to(auftrag_id)
 
 
@@ -442,6 +466,7 @@ def add_day(
         return _back_to(auftrag_id)
     try:
         slot = add_calendar_day(db, auftrag_id, slot_id, **_when(request, db))
+        insert_begruessung(db, slot.auftrag)
     except ValueError as exc:  # belegt, schon im Kalender, fest, unbekannt
         db.rollback()
         flash(request, str(exc), "err")

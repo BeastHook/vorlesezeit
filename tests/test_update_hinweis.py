@@ -11,7 +11,8 @@ import pytest
 import app
 from app import update_hinweis
 
-TEXT = "Update verfügbar, öffne die Startdatei."
+# Anfang des Balkens; die Versionsnummer steht dahinter (Job 026).
+TEXT = "Update verfügbar"
 
 
 @pytest.fixture
@@ -43,8 +44,25 @@ def test_newer_release_shows_banner(admin_client, github, monkeypatch):
     monkeypatch.setattr(app, "__version__", "0.3.0")
     response = _admin_page(admin_client)
     assert response.status_code == 200
-    assert TEXT in response.text
+    assert "Update verfügbar: Version 9.9.9, öffne die Startdatei." in response.text
     assert 'data-result="update"' in response.text
+
+
+def test_banner_names_version_without_v(admin_client, github, monkeypatch):
+    """Der Balken nennt die Nummer wie im Image-Tag und in `heimserver.sh update`."""
+    monkeypatch.setattr(app, "__version__", "0.4.0")
+    github.reply = lambda request: httpx.Response(200, json={"tag_name": "v0.5.0"})
+    text = _admin_page(admin_client).text
+    assert "Update verfügbar: Version 0.5.0, öffne die Startdatei." in text
+    assert "v0.5.0" not in text
+
+
+def test_banner_names_tag_given_without_v(admin_client, github, monkeypatch):
+    monkeypatch.setattr(app, "__version__", "0.4.0")
+    github.reply = lambda request: httpx.Response(200, json={"tag_name": "0.5.1"})
+    assert (
+        "Update verfügbar: Version 0.5.1, öffne die Startdatei." in _admin_page(admin_client).text
+    )
 
 
 def test_same_version_shows_no_banner(admin_client, github, monkeypatch):

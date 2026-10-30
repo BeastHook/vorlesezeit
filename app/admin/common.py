@@ -21,7 +21,7 @@ from app.auth.tokens import create_magic_link_token
 from app.delivery.trigger import evening_of, get_now
 from app.mail.report import mask_tonie_id
 from app.models import Campaign, CreativeTonie, Person, Slot
-from app.settings import delivery_time_for
+from app.settings import delivery_time_for, remember_public_address
 from app.templating import templates
 
 TABS = (
@@ -124,6 +124,9 @@ def _switcher(request: Request) -> dict | None:
 
 def render(request: Request, name: str, context: dict, *, tab: str | None) -> HTMLResponse:
     update_hinweis.anstossen()
+    # KTD9: eigene, kurze Sitzung wie _switcher; schreibt nur beim ersten Treffer.
+    with request.app.state.session_factory() as db:
+        remember_public_address(db, request.url)
     return templates.TemplateResponse(
         request,
         name,
@@ -134,6 +137,7 @@ def render(request: Request, name: str, context: dict, *, tab: str | None) -> HT
             "switcher": _switcher(request) if tab else None,
             "flash": request.session.pop("admin_flash", None),
             "update_verfuegbar": update_hinweis.update_verfuegbar(),
+            "update_version": (update_hinweis.neuester_tag() or "").removeprefix("v"),
         },
     )
 

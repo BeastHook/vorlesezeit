@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy import ForeignKey, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -28,6 +28,8 @@ class Person(Base):
     invited_at: Mapped[datetime | None] = mapped_column(default=None)
     # Zeitpunkt der letzten erfolgreich verschickten Erinnerung, None = nie.
     reminded_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Advent-Anreicherung KTD8: Zeitpunkt des Widerrufs, None = nicht widerrufen.
+    revoked_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class TonieKonto(Base):
@@ -84,6 +86,15 @@ class Campaign(Base):
     # Mehrkalender U2: Name des Kalenders. In der DB nullable (additiv per
     # ALTER TABLE ergaenzt), die Migration setzt Altbestaende auf "Familie".
     name: Mapped[str] = mapped_column(default="Familie", nullable=True)
+    # Advent-Anreicherung KTD8: Kindername je Kalender, None = instanzweiter Name.
+    kind_name: Mapped[str | None] = mapped_column(default=None)
+    # Advent-Anreicherung KTD8: Objektschluessel eigener Vorspann/Abspann,
+    # None = mitgelieferte Melodie bzw. kein Abspann.
+    vorspann_key: Mapped[str | None] = mapped_column(default=None)
+    abspann_key: Mapped[str | None] = mapped_column(default=None)
+    # Advent-Anreicherung KTD8: Vorspann fuer diesen Kalender abgeschaltet.
+    # DEFAULT 0 auch in der DB, wie beim additiven ALTER TABLE.
+    vorspann_aus: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
 
     slots: Mapped[list["Slot"]] = relationship(back_populates="campaign")
     tonies: Mapped[list["CreativeTonie"]] = relationship(back_populates="campaign")
@@ -126,6 +137,9 @@ class Auftrag(Base):
     person_id: Mapped[int | None] = mapped_column(ForeignKey("persons.id"), default=None)
     title: Mapped[str | None] = mapped_column(default=None)
     vorlesetext: Mapped[str | None] = mapped_column(default=None)
+    # Advent-Anreicherung KTD8: gesetzt, sobald die Begruessung eingefuegt ist
+    # oder nicht mehr kommen soll.
+    begruessung_at: Mapped[datetime | None] = mapped_column(default=None)
 
     person: Mapped[Person | None] = relationship()
     slots: Mapped[list["Slot"]] = relationship(back_populates="auftrag")
@@ -268,6 +282,10 @@ class Einstellungen(Base):
     hoechste_person_id: Mapped[int | None] = mapped_column(default=None)
     # JSON: Herkunft je Feld (z. B. Umgebung oder Setup-Reiter).
     herkunft: Mapped[str | None] = mapped_column(default=None)
+    # Advent-Anreicherung KTD8: Rahmen (Vorspann/Abspann) instanzweit abgeschaltet.
+    rahmen_aus: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
+    # Advent-Anreicherung KTD8/KTD9: oeffentliche Basisadresse fuer Anmeldelinks.
+    oeffentliche_adresse: Mapped[str | None] = mapped_column(default=None)
 
     def __repr__(self) -> str:
         return (
@@ -296,4 +314,20 @@ class Abendmeldung(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     evening: Mapped[date] = mapped_column(unique=True)
+    sent_at: Mapped[datetime] = mapped_column()
+
+
+class Morgenmail(Base):
+    """Advent-Anreicherung KTD6: Versandprotokoll der Morgen-Mails, hoechstens
+    eine je Person, Mailart ("heute" oder "archiv") und Tag (Berliner Datum)."""
+
+    __tablename__ = "morgenmails"
+    __table_args__ = (
+        UniqueConstraint("person_id", "mailart", "tag", name="uq_morgenmail_person_mailart_tag"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    person_id: Mapped[int] = mapped_column(ForeignKey("persons.id"))
+    mailart: Mapped[str] = mapped_column()
+    tag: Mapped[date] = mapped_column()
     sent_at: Mapped[datetime] = mapped_column()

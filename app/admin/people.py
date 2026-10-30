@@ -187,6 +187,8 @@ def erinnern(
         flash(request, f"Erinnerung an {name} konnte nicht verschickt werden.", "err")
     else:
         person.reminded_at = berlin_now(request)
+        # KTD8: eine neue Admin-Mail mit frischem Link hebt den Widerruf-Merker auf.
+        person.revoked_at = None
         db.commit()
         flash(request, f"Erinnerung an {name} verschickt.")
     return redirect("/admin/personen")
@@ -218,7 +220,8 @@ def einladen(
     else:
         if person.invited_at is None:
             person.invited_at = berlin_now(request)
-            db.commit()
+        person.revoked_at = None
+        db.commit()
         flash(request, f"Einladung an {name} verschickt.")
     return redirect("/admin/personen")
 
@@ -245,6 +248,8 @@ def widerrufen(
     # zugleich (app/auth/tokens.py, app/auth/dependencies.py).
     person = _get_relative(db, person_id)
     person.access_version += 1
+    # KTD8: Merker fuer die Morgen-Mails (U7), bis eine neue Admin-Mail ihn aufhebt.
+    person.revoked_at = berlin_now(request)
     db.commit()
     flash(request, f"Zugang von {person.display_name or person.email} widerrufen.")
     return redirect("/admin/personen")

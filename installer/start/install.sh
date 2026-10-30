@@ -1,9 +1,9 @@
 #!/bin/sh
 # Vorlesezeit installieren (Linux, NAS). Danach geht es im Browser weiter
 # (One-Klick-Setup, Baustein 3). Geht auch als Einzeiler:
-#   curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v0.4.0/installer/start/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v0.5.0/installer/start/install.sh | sh
 set -u
-VERSION="0.4.0"
+VERSION="0.5.0"
 IMAGE="ghcr.io/beasthook/vorlesezeit-installer:$VERSION"
 QUELLE="https://raw.githubusercontent.com/BeastHook/vorlesezeit/v$VERSION/installer/start/install.sh"
 ORDNER="$HOME/Vorlesezeit"

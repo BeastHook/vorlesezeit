@@ -2,8 +2,9 @@
 
 Anleitung für den Admin. Grundlage: Plan-Einheiten U14 und U15, KTD11, KTD14,
 KTD15, KTD19 des Hauptplans, für Setup, Zugangsdaten und mehrere Kalender
-`docs/plans/2026-10-01-2242-feat-setup-mehrkalender-plan.md`. Der Aufbau steht
-in `docker-compose.heimserver.yml`.
+`docs/plans/2026-10-01-2242-feat-setup-mehrkalender-plan.md`, für Rahmen und
+Morgen-Mails `docs/plans/2026-10-22-1626-feat-advent-anreicherung-plan.md`. Der
+Aufbau steht in `docker-compose.heimserver.yml`.
 
 ## Überblick
 
@@ -12,7 +13,7 @@ in `docker-compose.heimserver.yml`.
 | `app` | Vorlesezeit, nur im internen Compose-Netz, Gesundheitsprüfung gegen `/status` |
 | `s3` | Objektspeicher für die Aufnahmen (versitygw), nur intern; legt den Bucket beim Start als Verzeichnis an |
 | `cloudflared` | Cloudflare Tunnel, der einzige Weg von außen zur App |
-| `scheduler` | ruft alle 5 Minuten zwischen 17:00 und 01:45 (Europe/Berlin) `/delivery/trigger` auf, entscheidet selbst nichts |
+| `scheduler` | ruft alle 5 Minuten zwischen 17:00 und 01:45 sowie zwischen 07:00 und 11:00 (Europe/Berlin) `/delivery/trigger` auf, entscheidet selbst nichts |
 | `backup` | sichert jede Nacht um 00:30 Datenbank und Aufnahmen auf das zweite Medium; verpasst es den Lauf (Ruhezustand, Neustart), holt es ihn nach dem Aufwachen nach |
 
 Kein Dienst veröffentlicht einen Port, am Router wird nichts freigegeben.
@@ -245,7 +246,43 @@ SMTP-Zugang und Absender, Lieferzeit, Aufnahmefrist, Einladungstermin,
 Gültigkeit der Anmeldelinks und den Anzeigenamen des Admins. Jede Änderung
 gilt ohne Neustart. Zugangsdaten werden vor dem Speichern mit einer
 Test-Anmeldung geprüft. Eine geänderte Lieferzeit gilt bei schon offenem
-Zeitfenster erst ab dem nächsten Abend.
+Zeitfenster erst ab dem nächsten Abend. Oben im Reiter steht eine ruhige Zeile
+„Version <Nummer>". Nur wenn auf GitHub eine neuere Version liegt, steht dahinter
+die auffällige Markierung „Neue Version <Tag> auf GitHub"; bei aktueller
+Version, fehlender oder gescheiterter Abfrage und Entwicklungsversion bleibt es
+bei der Zeile.
+
+## Rahmen und Morgen-Mails
+
+**Rahmen.** Jede automatisch aufgespielte Geschichte bekommt einen Vorspann und
+einen Abspann. Der Vorspann ist die mitgelieferte Melodie oder eine eigene
+Datei, der Abspann nur eine eigene Datei. Beides wird je Kalender im Reiter
+Setup hochgeladen, jede Datei darf höchstens 60 s lang sein. Archiv,
+Admin-Anhören und Download zeigen die Aufnahme ohne Rahmen; den Rahmen trägt nur
+die Datei auf dem Tonie.
+
+**Rückweg ohne neue Bereitstellung:** im Reiter Setup im Abschnitt „Rahmen“ den
+Haken „Rahmen in diesem Advent aus“ setzen. Er wirkt ab dem nächsten Lauf und
+lässt alle Vorspann- und Abspann-Dateien stehen. Gelingt der Rahmenbeweis in der
+zweiten Generalprobe nicht, setzt der Admin den Haken vor dem 1.12. (R11).
+
+**Morgen-Mails.** Vom 1. bis 25.12. zwischen 07:00 und 11:00 (Europe/Berlin)
+bekommt die vorlesende Person eine Tages-Mail am Adventstag ihrer Geschichte
+und eine Archiv-Mail am Folgetag. Je Person, Mailart und Tag geht höchstens
+eine Mail raus; fällt der Versand aus, wird er bis 11:00 nachgeholt. Der
+Morgen-Zweig von `/delivery/trigger` braucht nur Datenbank und SMTP, berührt die
+Toniecloud nicht und startet keinen Lauf. Er antwortet `200` mit
+`{"gesendet": n}`, wenn mindestens eine Mail rausging, sonst `204`.
+
+Scheitert ein Versand, steht im Log `Morgen-Mail fehlgeschlagen`
+(`$DC logs app | grep Morgen-Mail`). Fehlt die öffentliche Adresse, steht dort
+`Archiv-Mail entfällt, öffentliche Adresse unbekannt`
+(`$DC logs app | grep Archiv-Mail`).
+
+**Öffentliche Adresse.** Die App merkt sie sich beim ersten Admin-Aufruf über
+https. Ändern lässt sie sich im Reiter Setup im Abschnitt „Adresse“ im Feld
+„Öffentliche Adresse“. Ohne bekannte Adresse geht keine Archiv-Mail raus, die
+Tages-Mail trotzdem.
 
 ## Generalprobe
 
@@ -258,6 +295,8 @@ jeder Vorabend-Lauf der Probe macht den Kalendertag fest. `run` **außerhalb
 des Zeitplanfensters 17:00–01:45** fahren oder vorher den Zeitplan-Container
 stoppen (`$DC stop scheduler`, danach `$DC start scheduler`): das Skript
 läuft in eigenem Prozess und teilt die Sperre je Tonie nicht mit der App.
+Für den Rahmenbeweis bekommt der Generalprobe-Kalender im Setup einen Abspann,
+der Vorspann ist die Melodie.
 
 ## Starten, stoppen, aktualisieren
 
@@ -266,6 +305,7 @@ Kurzform: `DC="docker compose -f docker-compose.heimserver.yml --env-file .env.h
 | Zweck | Kommando |
 |---|---|
 | Erster Start / Update | `git pull && $DC up -d --build` |
+| Update auf ein Release | `deploy/heimserver.sh update X.Y.Z` |
 | Zustand | `$DC ps` (App soll `healthy` sein) |
 | Logs | `$DC logs -f app scheduler backup` |
 | Stoppen (Daten bleiben) | `$DC stop` bzw. `$DC down` |
@@ -275,8 +315,37 @@ Für ein Update ohne Schemaänderung gibt es `deploy/heimserver.sh` (nach
 `git pull`): `pre` bricht ab, wenn nicht sauberes `main` ausgecheckt ist,
 und löst eine Sicherung aus; `up` baut und startet neu; `post` zeigt Zustand,
 `/status` und Fehler oder einen Einrichtungslink im Log der letzten 5 Minuten.
-Mit Schemaänderung vorher zusätzlich die Migrationsprobe auf einer Kopie der
-Datenbank.
+Steht in `.env.heimserver` eine Zeile `VORLESEZEIT_IMAGE` (aus `update`, siehe
+unten), entfernt `up` sie zuerst: wer aus dem Checkout baut, verlässt das
+Release-Image.
+
+**Bereitstellung der Advent-Anreicherung:** `scheduler` nutzt dasselbe Image wie
+`app` und startet deshalb mit `up` bzw. `update X.Y.Z` neu. Danach prüfen, dass
+`$DC ps` den `scheduler` mit frischer Startzeit zeigt. Dann als Admin einmal
+`https://advent.<domain>` aufrufen, damit die öffentliche Adresse gespeichert
+wird.
+
+**Update auf ein Release:** `deploy/heimserver.sh update X.Y.Z` (Nummer ohne
+`v`, wie im Balken "Update verfügbar: Version X.Y.Z" im Admin-Bereich). Das
+Skript merkt sich das laufende App-Image, löst eine Sicherung aus, lädt
+`ghcr.io/beasthook/vorlesezeit:X.Y.Z`, schreibt `VORLESEZEIT_IMAGE` in
+`.env.heimserver` und startet ohne Bau neu. Danach wartet es bis zu 180 s, bis
+die App `healthy` ist und `/status` die neue Version meldet. Scheitert
+Sicherung oder Laden, ändert es nichts (Exit-Code 1). Scheitert die Prüfung,
+setzt es das vorige Image zurück, startet neu und nennt die Sicherung von
+vorher (Exit-Code 1). Die Datenbank spielt es dabei nicht zurück, eine
+Migrationsprobe macht es nicht, und alte Images löscht es nicht. Zurück zum
+Bau aus `main` geht es mit `pre`/`up`/`post`.
+
+Mit Schemaänderung vor `up` bzw. `update` zusätzlich die Migrationsprobe auf einer Kopie der
+Datenbank: `python -m scripts.migrationsprobe <kopie>` (im Haupt-Checkout mit
+`.venv` oder im App-Container). Das Skript kopiert die Datei noch einmal und
+arbeitet nur auf dieser Kopie. Es zeigt die Zeilenzahlen je Tabelle, prüft
+Altwerte, neue Spalten, einen harmlosen zweiten Start und `integrity_check` und
+endet nur bei bestandener Probe mit Exit-Code 0. Zuletzt listet es die Personen,
+die die Migration als widerrufen markiert (ID und Anzeigename). Der Admin
+bestätigt diese Liste vor der Bereitstellung und hebt den Merker für wieder
+eingeladene Personen auf.
 
 **Umstellung auf die Mehrkalender-Version** (einmalig): vor dem ersten Start
 der neuen Version eine Sicherung auslösen (`$DC exec backup python
@@ -310,31 +379,37 @@ wenn gewünscht, den Mailversand über Brevo. Das Skript läuft auf deinem Mac,
 nicht im Container.
 
 Einmalig in Cloudflare unter **My Profile → API Tokens** ein Token anlegen:
-Konto „Cloudflare Tunnel: Bearbeiten", Zone `vorlesezeit.app` „DNS:
-Bearbeiten". In der Shell (nie in den Chat):
+Konto „Cloudflare Tunnel: Bearbeiten", Konto „Email Routing Addresses:
+Lesen", Zone `vorlesezeit.app` „DNS: Bearbeiten" und Zone „Email Routing
+Rules: Bearbeiten". In der Shell (nie in den Chat):
 
     export CLOUDFLARE_API_TOKEN=…   CLOUDFLARE_ACCOUNT_ID=…   CLOUDFLARE_ZONE_ID=…
     export BREVO_SMTP_LOGIN=…        # SMTP-Login aus Brevo, optional
 
 Je Freund in Brevo unter **SMTP & API → SMTP** einen eigenen SMTP-Schlüssel
-erzeugen (Name = Freund). Dann:
+erzeugen (Name = Freund). Vorher die Admin-Mail des Freundes in Cloudflare unter
+**Email Routing → Zieladressen** anlegen und per Bestätigungsmail bestätigen
+lassen; sonst bricht `neu` vor jeder Änderung ab. Das Skript legt dann die
+Mailregel `<name>@vorlesezeit.app` → Admin-Mail an, damit Antworten ankommen. Dann:
 
-    python -m scripts.einladen neu mueller      # fragt den Schlüssel verdeckt ab
+    python -m scripts.einladen neu mueller freund@example.org   # fragt den Schlüssel verdeckt ab
     docker compose up -d                         # Entwicklungs-Stack für den Test
     python -m scripts.einladen testen            # Code einfügen, prüft die Adresse
     python -m scripts.einladen liste             # wer ist verbunden?
     python -m scripts.einladen widerrufen mueller
 
 `liste` warnt, wenn mehr als ein Gerät mit demselben Code verbunden ist.
-Nach `widerrufen` den Brevo-Schlüssel im Dashboard löschen. Die Merkliste
-`~/.vorlesezeit/einladungen.json` enthält keine Geheimnisse.
+`widerrufen` entfernt auch die Mailregel. Nach `widerrufen` den Brevo-Schlüssel
+im Dashboard löschen. Die Merkliste `~/.vorlesezeit/einladungen.json` enthält die
+Admin-Mail des Freundes, aber keine Geheimnisse.
 
 Die App des Freundes fragt höchstens einmal am Tag
 `https://api.github.com/repos/BeastHook/vorlesezeit/releases/latest` ab (nur
 lesen, ohne Zugangsdaten). GitHub sieht dabei die IP-Adresse der Instanz. Ist das
 neueste Release neuer als die laufende Version, zeigt jede Admin-Seite den Balken
-„Update verfügbar, öffne die Startdatei.". Die Abfrage startet erst beim ersten
+„Update verfügbar: Version X.Y.Z, öffne die Startdatei.". Die Abfrage startet erst beim ersten
 Admin-Seitenaufruf nach dem Start; der Balken erscheint ab dem nächsten Aufruf.
+Die Versionszeile im Reiter Setup zeigt den Stand.
 Scheitert die Abfrage (kein Netz, Firmen-Proxy, GitHub nicht erreichbar), zeigt
 die App nichts und versucht es nach 24 Stunden erneut. Auch der Heimserver fragt
 so ab.
@@ -352,7 +427,7 @@ den Einladungscode und eine Startdatei aus `installer/start/`:
 
 Einzeiler für Linux und NAS:
 
-    curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v0.4.0/installer/start/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v0.5.0/installer/start/install.sh | sh
 
 Die Startdatei prüft Docker (fehlt es, öffnet sie die Downloadseite; läuft es
 nicht, startet sie es und wartet bis zu 2 Minuten), unter Windows auch WSL2.
@@ -531,6 +606,7 @@ Zwei Aufträge, beide mit Zeitzone `Europe/Berlin`.
 | cron-job.org, Auftrag 2, Fehlschlag | Sicherung älter als 36 h oder nie gelaufen | `$DC logs backup`, Sicherungsziel eingehängt und beschreibbar? Danach `--once` (siehe oben) und die Prüfadresse erneut aufrufen. |
 | cron-job.org „wieder erreichbar“ | Wiederherstellung | nichts, außer ein Abend blieb ohne Lauf: Reiter „Auslieferung“ prüfen. |
 | cron-job.org „Auftrag deaktiviert“ | 25 Fehlschläge in Folge | Ursache beheben, dann wieder einschalten (unten). |
+| Abendmeldung der App mit „Ohne Rahmen ausgeliefert“ | Die Geschichte ist auf dem Tonie, aber ohne Vorspann und Abspann | Rahmen des Kalenders im Setup anhören, ersetzen oder entfernen, sonst den Haken „Rahmen in diesem Advent aus“ setzen. |
 | Abendmeldung der App mit Fehlschlag oder Ersatzbeitrag (eine Sammelmeldung je Abend über alle Tonies; ein Fehlschlag kommt zusätzlich sofort als Einzelmeldung mit der Zeile „Tonie: ••••XXXX“) | Lauf lief, aber nicht wie geplant | Mit dem Tonie-Umschalter den genannten Tonie wählen, dann Reiter „Auslieferung“ und „Aufnahmen“. |
 
 Fällt der Mailanbieter aus (Drosselung, Sperre der Absender-IP), fehlen

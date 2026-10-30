@@ -10,34 +10,88 @@
   <option value=""{% if tonie.campaign_id is none %} selected{% endif %}>ohne Kalender</option>
 </select>
 {% endmacro %}
+{% macro rahmen_upload(c, teil, eigen) %}
+<details class="setup-details">
+  <summary class="btn btn-ghost">{% if eigen %}Andere Datei hochladen …{% else %}Eigene Datei hochladen …{% endif %}</summary>
+  <form class="kal-teil" method="post" action="/admin/setup/kalender/{{ c.id }}/{{ teil }}" enctype="multipart/form-data">
+    <label class="drop">Datei wählen (mp3, m4a, wav, ogg …)<br><input type="file" name="file" accept="audio/*" required><br>
+      <span class="meta">Höchstens 60 Sekunden. Wird so laut gemacht wie die Geschichten.</span></label>
+    <div class="btn-row-left"><button type="submit" class="btn btn-secondary btn-inline">Hochladen</button></div>
+  </form>
+</details>
+{% endmacro %}
 {% block content %}
+<section data-role="version-box">
+  {% if versionsstand == "neu" %}<p class="meta">Version {{ version }} <span class="tag tag-warn" data-result="version-neu">Neue Version {{ neuester_tag }} auf GitHub</span></p>
+  {% else %}<p class="meta" data-result="version-{{ versionsstand }}">Version {{ version }}</p>
+  {% endif %}
+</section>
 {% if neu_eingeben %}
 <div class="flash err" role="alert">{% if neu_eingeben|length == 1 %}Ein gespeichertes Passwort lässt{% else %}{{ neu_eingeben|length }} gespeicherte Passwörter lassen{% endif %} sich nicht entschlüsseln. Bitte unten neu eingeben. Bis dahin meldet sich die App mit diesen Zugangsdaten nirgends an.</div>
 {% endif %}
 <nav class="setup-nav" aria-label="Abschnitte">
-  <a href="#s-kal">Kalender</a><a href="#s-konten">tonies-Konten</a><a href="#s-smtp">Mailversand</a><a href="#s-termine">Termine</a><a href="#s-name">Namen</a>
+  <a href="#s-kal">Kalender</a><a href="#s-konten">tonies-Konten</a><a href="#s-smtp">Mailversand</a><a href="#s-termine">Termine</a><a href="#s-name">Namen</a><a href="#s-rahmen">Rahmen</a><a href="#s-adresse">Adresse</a>
 </nav>
 
 <section class="setup-section" id="s-kal">
   <h3>Kalender</h3>
   <p class="meta">Jeder Kalender hat 24 Tage, einen eigenen Ersatzbeitrag und einen eigenen Verlauf. Löschen geht erst, wenn kein Tonie mehr dazugehört.</p>
+  {% if rahmen_aus %}<div class="lock-note"><strong>Der Rahmen ist aus.</strong> Vorspann und Abspann laufen in keinem Kalender. Du kannst sie hier weiter anhören und ändern.</div>{% endif %}
   <div class="panel-grid">
     {% for k in kalender %}
-    <form class="panel{% if not k.tonies %} muted{% endif %}" method="post" action="/admin/setup/kalender/{{ k.calendar.id }}">
-      <div class="field"><label for="k{{ k.calendar.id }}">Name</label><input class="input" id="k{{ k.calendar.id }}" name="name" value="{{ k.calendar.name or '' }}" required></div>
-      <div class="cal-chips">
-        {% for t in k.tonies %}<span class="cal-chip">{{ t.name or short_id(t.tonie_id) }}</span>{% else %}<span class="tag tag-outline">kein Tonie</span>{% endfor %}
+    {% set c = k.calendar %}
+    <div class="panel{% if not k.tonies %} muted{% endif %}">
+      <form class="kal-teil" method="post" action="/admin/setup/kalender/{{ c.id }}">
+        <div class="field"><label for="k{{ c.id }}">Name</label><input class="input" id="k{{ c.id }}" name="name" value="{{ c.name or '' }}" required></div>
+        <div class="field"><label for="kk{{ c.id }}">Für wen ist der Kalender?</label><input class="input" id="kk{{ c.id }}" name="kind_name" value="{{ c.kind_name or '' }}" placeholder="{{ kind_name or 'Emma' }}"></div>
+        <p class="meta">Steht in der Begrüßung im Vorlesetext und in den Morgen-Mails. {% if kind_name %}Leer lassen, dann gilt „{{ kind_name }}“ aus „Namen“.{% else %}Leer lassen, dann gilt der Name aus „Namen“.{% endif %}</p>
+        <div class="cal-chips">
+          {% for t in k.tonies %}<span class="cal-chip">{{ t.name or short_id(t.tonie_id) }}</span>{% else %}<span class="tag tag-outline">kein Tonie</span>{% endfor %}
+        </div>
+        {% if k.tonies %}
+        <p class="meta">{{ k.vergeben }} Aufträge vergeben, {{ 24 - k.vergeben }} Tage frei.</p>
+        {% else %}
+        <p class="meta">Ohne Tonie läuft nichts und es kommt keine Meldung. Ordne unten bei einem Konto einen Tonie zu.</p>
+        {% endif %}
+        <div class="btn-row-left">
+          <button type="submit" class="btn btn-secondary btn-inline">Speichern</button>
+          <a class="btn btn-ghost" href="/admin/setup/kalender/{{ c.id }}/loeschen">Löschen …</a>
+        </div>
+      </form>
+      <div class="kal-teil">
+        <div class="panel-kicker">Vorspann</div>
+        <div class="field-state" style="margin-top:0">
+          {% if c.vorspann_aus %}<span class="tag tag-outline">aus</span><span class="meta">läuft nicht auf dem Tonie</span>
+          {% elif c.vorspann_key %}<span class="tag tag-accent-2">eigene Datei</span>
+          {% else %}<span class="tag tag-accent-2">mitgelieferte Melodie</span>{% endif %}
+        </div>
+        <audio controls preload="metadata" style="width:100%" aria-label="Vorspann anhören" src="{% if c.vorspann_key %}/admin/setup/kalender/{{ c.id }}/vorspann/audio{% else %}/admin/setup/melodie/audio{% endif %}"></audio>
+        <div class="btn-row-left">
+          <form method="post" action="/admin/setup/kalender/{{ c.id }}/vorspann/schalter">
+            {% if c.vorspann_aus %}<input type="hidden" name="aus" value="0"><button type="submit" class="btn btn-secondary btn-inline">Einschalten</button>
+            {% else %}<input type="hidden" name="aus" value="1"><button type="submit" class="btn btn-ghost btn-inline">Ausschalten</button>{% endif %}
+          </form>
+          {% if c.vorspann_key %}
+          <form method="post" action="/admin/setup/kalender/{{ c.id }}/vorspann/entfernen"><button type="submit" class="btn btn-ghost btn-inline">Eigene Datei entfernen</button></form>
+          {% endif %}
+        </div>
+        {{ rahmen_upload(c, "vorspann", c.vorspann_key) }}
       </div>
-      {% if k.tonies %}
-      <p class="meta">{{ k.vergeben }} Aufträge vergeben, {{ 24 - k.vergeben }} Tage frei.</p>
-      {% else %}
-      <p class="meta">Ohne Tonie läuft nichts und es kommt keine Meldung. Ordne unten bei einem Konto einen Tonie zu.</p>
-      {% endif %}
-      <div class="btn-row-left">
-        <button type="submit" class="btn btn-secondary btn-inline">Umbenennen</button>
-        <a class="btn btn-ghost" href="/admin/setup/kalender/{{ k.calendar.id }}/loeschen">Löschen …</a>
+      <div class="kal-teil">
+        <div class="panel-kicker">Abspann</div>
+        <div class="field-state" style="margin-top:0">
+          {% if c.abspann_key %}<span class="tag tag-accent-2">eigene Datei</span>
+          {% else %}<span class="tag tag-neutral">keiner</span><span class="meta">Das Kapitel endet mit der Geschichte.</span>{% endif %}
+        </div>
+        {% if c.abspann_key %}
+        <audio controls preload="metadata" style="width:100%" aria-label="Abspann anhören" src="/admin/setup/kalender/{{ c.id }}/abspann/audio"></audio>
+        <div class="btn-row-left">
+          <form method="post" action="/admin/setup/kalender/{{ c.id }}/abspann/entfernen"><button type="submit" class="btn btn-ghost btn-inline">Entfernen</button></form>
+        </div>
+        {% endif %}
+        {{ rahmen_upload(c, "abspann", c.abspann_key) }}
       </div>
-    </form>
+    </div>
     {% endfor %}
     <form class="panel" method="post" action="/admin/setup/kalender">
       <div class="panel-kicker">Neuer Kalender</div>
@@ -180,7 +234,28 @@
     <div class="field"><label for="n1">So nennt dich die Familie</label><input class="input" id="n1" name="admin_display_name" value="{{ display_name }}"></div>
     <p class="meta">Steht in Mails und auf den Seiten der Familie statt „Admin“, z. B. „liegt jetzt bei {{ display_name or "Luca" }} zur Freigabe“.</p>
     <div class="field"><label for="n2">Für wen ist der Kalender?</label><input class="input" id="n2" name="kind_name" value="{{ kind_name }}"></div>
-    <p class="meta">Steht in der Einladung, der Erinnerung und auf den Seiten der Familie, z. B. „Ein Adventskalender für {{ kind_name or "Emma" }}“. Für mehrere Kinder einfach „Emma und Paul“.</p>
+    <p class="meta">Steht in der Einladung, der Erinnerung und auf den Seiten der Familie, z. B. „Ein Adventskalender für {{ kind_name or "Emma" }}“. Für mehrere Kinder einfach „Emma und Paul“. Begrüßung und Morgen-Mails nehmen zuerst den Namen beim Kalender oben, dieser gilt nur, wo dort nichts steht.</p>
+    <button type="submit" class="btn btn-secondary btn-inline">Speichern</button>
+  </form>
+</section>
+
+<section class="setup-section" id="s-rahmen">
+  <h3>Rahmen</h3>
+  <p class="meta">Vorspann und Abspann stellst du je Kalender oben ein.</p>
+  <form class="panel" method="post" action="/admin/setup/rahmen">
+    <div class="field-state" style="margin-top:0">{% if rahmen_aus %}<span class="tag tag-warn">Rahmen aus</span>{% else %}<span class="tag tag-accent-2">Rahmen läuft</span>{% endif %}</div>
+    <label class="check-line"><input type="checkbox" name="rahmen_aus" value="1"{% if rahmen_aus %} checked{% endif %}> Rahmen in diesem Advent aus</label>
+    <p class="meta">Für den Notfall: Dann geht in allen Kalendern nur die Geschichte auf den Tonie, ohne Vorspann und Abspann. Die Dateien bleiben erhalten.</p>
+    <button type="submit" class="btn btn-secondary btn-inline">Speichern</button>
+  </form>
+</section>
+
+<section class="setup-section" id="s-adresse">
+  <h3>Adresse</h3>
+  <form class="panel" method="post" action="/admin/setup/adresse">
+    <div class="field"><label for="ad1">Öffentliche Adresse</label><input class="input" id="ad1" name="oeffentliche_adresse" inputmode="url" autocomplete="off" placeholder="https://advent.vorlesezeit.app" value="{{ oeffentliche_adresse }}">
+      {% if not oeffentliche_adresse %}<div class="field-state"><span class="tag tag-outline">noch nicht bekannt</span></div>{% endif %}</div>
+    <p class="meta">Mit dieser Adresse beginnt der Link in der Archiv-Mail.{% if not oeffentliche_adresse %} Ohne Adresse geht keine Archiv-Mail raus. Die App merkt sie sich, sobald du den Admin-Bereich über https öffnest.{% endif %}</p>
     <button type="submit" class="btn btn-secondary btn-inline">Speichern</button>
   </form>
 </section>

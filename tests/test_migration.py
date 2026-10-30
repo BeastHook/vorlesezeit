@@ -7,7 +7,12 @@ aus den aktuellen Modellen -- sonst bewiese der Test nichts ueber Altbestaende.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
+import sys
+from datetime import date, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, inspect, select, text
@@ -16,7 +21,16 @@ from sqlalchemy.orm import Session
 
 import app.db as db_module
 from app.db import init_db
-from app.models import Auftrag, Beitrag, Campaign, CreativeTonie, Slot
+from app.models import (
+    Auftrag,
+    Beitrag,
+    Campaign,
+    CreativeTonie,
+    Einstellungen,
+    Morgenmail,
+    Person,
+    Slot,
+)
 
 OLD_SCHEMA = """
 CREATE TABLE persons (
@@ -469,3 +483,194 @@ def test_withdrawn_at_column_added_to_existing_db(tmp_path):
     init_db(engine)
 
     assert "withdrawn_at" in _columns(engine, "beitraege")
+
+
+# Advent-Anreicherung U1 (KTD8): neue Merker, Versandprotokoll und Abbildung.
+ADVENT_COLUMNS = [
+    ("auftraege", "begruessung_at"),
+    ("persons", "revoked_at"),
+    ("campaigns", "kind_name"),
+    ("campaigns", "vorspann_key"),
+    ("campaigns", "abspann_key"),
+    ("campaigns", "vorspann_aus"),
+    ("einstellungen", "rahmen_aus"),
+    ("einstellungen", "oeffentliche_adresse"),
+]
+
+
+def test_advent_columns_and_morgenmails_exist_after_old_db(migrated):
+    engine, _ = migrated
+    for table, column in ADVENT_COLUMNS:
+        assert column in _columns(engine, table), (table, column)
+    assert "morgenmails" in inspect(engine).get_table_names()
+
+
+def test_assigned_auftrag_from_old_db_gets_begruessung_at(migrated):
+    engine, _ = migrated
+    with Session(engine) as s:
+        assert s.get(Slot, 1).auftrag.begruessung_at is not None
+        assert s.get(Slot, 3).auftrag.begruessung_at is None
+        assert s.get(Slot, 4).auftrag.begruessung_at is None
+
+
+def test_person_with_access_version_gets_revoked_at(migrated):
+    engine, _ = migrated
+    with Session(engine) as s:
+        assert s.get(Person, 2).revoked_at is not None
+        assert s.get(Person, 1).revoked_at is None
+
+
+def test_old_db_booleans_default_to_false(migrated):
+    engine, _ = migrated
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT vorspann_aus FROM campaigns")).scalars().all() == [0]
+        assert conn.execute(text("SELECT rahmen_aus FROM einstellungen")).scalars().all() == []
+
+
+def _current_db_without_advent_columns(tmp_path):
+    """Aktuelles Schema mit Daten, dann die Advent-Spalten entfernt (Stand vor U1)."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'vor-u1.db'}")
+    init_db(engine)
+    with Session(engine) as s:
+        oma = Person(email="oma@example.test", display_name="Oma", access_version=2)
+        opa = Person(email="opa@example.test", display_name="Opa")
+        s.add_all([oma, opa])
+        s.flush()
+        s.add_all([Auftrag(person_id=oma.id, title="Stern"), Auftrag(title="Frei")])
+        s.add(Campaign(name="Mila"))
+        s.add(Einstellungen(id=1))
+        s.commit()
+    with engine.begin() as conn:
+        for table, column in ADVENT_COLUMNS:
+            conn.exec_driver_sql(f"ALTER TABLE {table} DROP COLUMN {column}")
+    return engine
+
+
+def test_current_db_without_advent_columns_gets_them_with_mapping(tmp_path):
+    engine = _current_db_without_advent_columns(tmp_path)
+
+    init_db(engine)
+
+    for table, column in ADVENT_COLUMNS:
+        assert column in _columns(engine, table), (table, column)
+    with Session(engine) as s:
+        oma = s.scalars(select(Person).where(Person.display_name == "Oma")).one()
+        opa = s.scalars(select(Person).where(Person.display_name == "Opa")).one()
+        assert oma.revoked_at is not None
+        assert opa.revoked_at is None
+        auftraege = {a.title: a for a in s.scalars(select(Auftrag))}
+        assert auftraege["Stern"].begruessung_at is not None
+        assert auftraege["Frei"].begruessung_at is None
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT vorspann_aus FROM campaigns")).scalars().all() == [0]
+        assert conn.execute(text("SELECT rahmen_aus FROM einstellungen")).scalars().all() == [0]
+
+
+def test_advent_mapping_is_atomic(tmp_path, monkeypatch):
+    engine = _current_db_without_advent_columns(tmp_path)
+    before = _dump(engine)
+    real = db_module._map_advent_data
+
+    def failing(conn, missing):
+        real(conn, missing)
+        raise RuntimeError("Abbruch mitten in der Abbildung")
+
+    monkeypatch.setattr(db_module, "_map_advent_data", failing)
+    with pytest.raises(RuntimeError):
+        init_db(engine)
+
+    assert "begruessung_at" not in _columns(engine, "auftraege")
+    assert "revoked_at" not in _columns(engine, "persons")
+    assert _dump(engine) == before
+
+    # Der naechste Start holt die Abbildung vollstaendig nach.
+    monkeypatch.setattr(db_module, "_map_advent_data", real)
+    init_db(engine)
+    with Session(engine) as s:
+        oma = s.scalars(select(Person).where(Person.display_name == "Oma")).one()
+        assert oma.revoked_at is not None
+        stern = s.scalars(select(Auftrag).where(Auftrag.title == "Stern")).one()
+        assert stern.begruessung_at is not None
+
+
+def test_fresh_db_never_maps_advent_markers(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'neu-u1.db'}")
+    init_db(engine)
+    with Session(engine) as s:
+        person = Person(email="oma@example.test", display_name="Oma", access_version=1)
+        s.add(person)
+        s.flush()
+        s.add(Auftrag(person_id=person.id, title="Stern"))
+        s.commit()
+
+    init_db(engine)
+
+    with Session(engine) as s:
+        assert s.scalars(select(Person)).one().revoked_at is None
+        assert s.scalars(select(Auftrag)).one().begruessung_at is None
+
+
+def _person(engine) -> int:
+    with Session(engine) as s:
+        person = Person(email="oma@example.test", display_name="Oma")
+        s.add(person)
+        s.commit()
+        return person.id
+
+
+def test_morgenmail_same_key_twice_is_rejected(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'morgen.db'}")
+    init_db(engine)
+    person_id = _person(engine)
+    sent = datetime(2026, 12, 5, 6, 0)
+    with Session(engine) as s:
+        s.add(Morgenmail(person_id=person_id, mailart="heute", tag=date(2026, 12, 5), sent_at=sent))
+        s.commit()
+        s.add(Morgenmail(person_id=person_id, mailart="heute", tag=date(2026, 12, 5), sent_at=sent))
+        with pytest.raises(IntegrityError):
+            s.commit()
+
+
+def test_morgenmail_other_day_or_mailart_is_stored(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'morgen2.db'}")
+    init_db(engine)
+    person_id = _person(engine)
+    sent = datetime(2026, 12, 5, 6, 0)
+    with Session(engine) as s:
+        s.add_all(
+            [
+                Morgenmail(
+                    person_id=person_id, mailart="heute", tag=date(2026, 12, 5), sent_at=sent
+                ),
+                Morgenmail(
+                    person_id=person_id, mailart="heute", tag=date(2026, 12, 6), sent_at=sent
+                ),
+                Morgenmail(
+                    person_id=person_id, mailart="archiv", tag=date(2026, 12, 5), sent_at=sent
+                ),
+            ]
+        )
+        s.commit()
+        assert len(s.scalars(select(Morgenmail)).all()) == 3
+
+
+def test_migrationsprobe_lists_revoked_persons_and_leaves_original(tmp_path):
+    engine = _old_db(tmp_path)
+    engine.dispose()
+    original = tmp_path / "alt.db"
+    digest = hashlib.sha256(original.read_bytes()).hexdigest()
+
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.migrationsprobe", str(original)],
+        cwd=Path(__file__).resolve().parent.parent,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = result.stdout.splitlines()
+    assert any("2" in line and "Oma" in line for line in lines), result.stdout
+    assert not any("admin@example.test" in line or "oma@example.test" in line for line in lines)
+    assert any("integrity_check" in line and "ok" in line for line in lines), result.stdout
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == digest

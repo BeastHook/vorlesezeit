@@ -508,3 +508,84 @@ def test_seeded_konto_not_linked_when_several_tonies_without_konto(engine, tmp_p
     with Session(engine) as s:
         assert [t.konto_id for t in s.scalars(select(CreativeTonie))] == [None, None]
         assert len(s.scalars(select(TonieKonto)).all()) == 1
+
+
+# --- Oeffentliche Adresse (Advent-Anreicherung U6, KTD9) -----------------------
+
+ADVENT = "https://advent.vorlesezeit.app"
+
+
+def _login_admin_at(client: TestClient, base: str) -> None:
+    """httpx schickt das Sitzungs-Cookie nur an den Host der Anmeldung."""
+    with client.app.state.session_factory() as s:
+        admin = s.scalars(select(Person).where(Person.is_admin.is_(True))).one()
+        token = create_magic_link_token(load_config(), admin)
+    client.post(f"{base}/login/confirm", data={"token": token})
+
+
+def _adresse(client: TestClient) -> str | None:
+    with client.app.state.session_factory() as s:
+        return st.get_einstellungen(s).oeffentliche_adresse
+
+
+def _admin_get(client: TestClient, base: str) -> None:
+    _login_admin_at(client, base)
+    response = client.get(f"{base}/admin/personen", follow_redirects=False)
+    assert response.status_code == 200
+
+
+def test_admin_page_over_https_host_remembers_address(client):
+    _admin_get(client, ADVENT)
+    assert _adresse(client) == ADVENT
+
+
+def test_stored_address_is_not_overwritten(client):
+    _admin_get(client, ADVENT)
+    _admin_get(client, "https://tunnel.example.test")
+    assert _adresse(client) == ADVENT
+
+
+@pytest.mark.parametrize(
+    "base", ["https://192.168.1.5", "http://localhost", "http://advent.vorlesezeit.app"]
+)
+def test_admin_page_without_public_https_host_leaves_address_empty(client, base):
+    _admin_get(client, base)
+    assert _adresse(client) is None
+
+
+def test_admin_page_on_testserver_leaves_address_empty(admin_client):
+    assert admin_client.get("/admin/personen", follow_redirects=False).status_code == 200
+    assert _adresse(admin_client) is None
+
+
+def test_family_page_leaves_address_empty(client, db_session):
+    person = Person(email="verwandte@example.test", display_name="Verwandte")
+    db_session.add(person)
+    db_session.commit()
+    token = create_magic_link_token(load_config(), person)
+    client.post(f"{ADVENT}/login/confirm", data={"token": token})
+    response = client.get(f"{ADVENT}/", follow_redirects=False)
+    assert response.status_code == 200
+    assert _adresse(client) is None
+
+
+def test_remember_address_rejects_ipv6_and_keeps_port(engine):
+    from starlette.datastructures import URL
+
+    with Session(engine) as s:
+        assert st.remember_public_address(s, URL("https://[2001:db8::1]/admin")) is False
+        assert st.get_einstellungen(s).oeffentliche_adresse is None
+        url = URL("https://advent.example.test:8443/admin/x?y=1")
+        assert st.remember_public_address(s, url) is True
+    with Session(engine) as s:
+        assert st.get_einstellungen(s).oeffentliche_adresse == "https://advent.example.test:8443"
+
+
+def test_remember_address_fills_empty_text(engine):
+    from starlette.datastructures import URL
+
+    with Session(engine) as s:
+        st.get_einstellungen(s).oeffentliche_adresse = ""
+        s.commit()
+        assert st.remember_public_address(s, URL(f"{ADVENT}/admin")) is True
+        assert st.get_einstellungen(s).oeffentliche_adresse == ADVENT

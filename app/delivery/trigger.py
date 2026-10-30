@@ -28,6 +28,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -52,6 +53,7 @@ from app.delivery.job import (
 )
 from app.mail.report import SummaryRow, build_summary_message, mask_tonie_id, send_report_mail
 from app.mail.smtp import send_message
+from app.mail.vorlesende import is_morning, send_morning_mails
 from app.models import Abendmeldung, CreativeTonie, DeliveryRun, Person
 from app.settings import delivery_time_for
 from app.storage import ObjectStorage
@@ -218,7 +220,8 @@ def trigger(
     config: Config = request.app.state.config
     check_trigger_secret(config, x_trigger_secret)
 
-    due = determine_due(now, delivery_time_for(db, evening_of(now)))
+    morning = is_morning(now)
+    due = None if morning else determine_due(now, delivery_time_for(db, evening_of(now)))
     states = trigger_states(request, db, factory, storage, start, due, now) if due else {}
     state = worst_state(list(states.values()))
     try:
@@ -226,6 +229,16 @@ def trigger(
     except Exception:
         # Die Zeile ist wieder entfernt; der naechste Aufruf versucht es erneut.
         logger.exception("Sammel-Abendmeldung nicht verschickt: abend=%s", evening_of(now))
+
+    if morning:
+        try:
+            gesendet = send_morning_mails(config, db, now)
+        except Exception:
+            logger.exception("Morgen-Mails nicht verschickt")
+            gesendet = 0
+        logger.info("Auslösung quelle=%s morgen-mails=%s", x_trigger_source, gesendet)
+        if gesendet:
+            return JSONResponse({"gesendet": gesendet})
 
     logger.info(
         "Auslösung quelle=%s zustand=%s laufart=%s zieltag=%s tonies=%s",

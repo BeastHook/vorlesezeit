@@ -23,29 +23,36 @@ jedem POST-Formular mit.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import FormData
 
-from app import settings
+import app
+from app import settings, update_hinweis
 from app.admin.common import flash, redirect, render
 from app.admin.setup import new_campaign
 from app.auth.dependencies import get_db, require_admin
 from app.crypto import CredentialsUnavailable, decrypt
+from app.delivery.audio import probe_duration_seconds
 from app.delivery.chapters import load_app_chapters
 from app.delivery.job import TonieBusyError, client_for, detach_tonie, tonie_run_active
+from app.delivery.rahmen import MELODIE_KEY, melodie
 from app.delivery.trigger import get_now, get_toniecloud_factory
 from app.mail.magic_link import german_date
 from app.mail.smtp import check_smtp
 from app.models import Auftrag, Campaign, CreativeTonie, DeliveryRun, Person, Slot, TonieKonto
+from app.recording.normalize import EmptyRecordingError, normalize_recording
+from app.recording.views import MAX_UPLOAD_BYTES
+from app.storage import ObjectStorage, audio_response, commit_or_discard, delete_quietly
 from app.toniecloud.client import (
     KontoPruefung,
     LoginTimeoutError,
@@ -65,6 +72,11 @@ KONTO_NICHT_ERREICHBAR = "Die Toniecloud ist gerade nicht erreichbar."
 SMTP_PASSWORT_NEU = "Server geändert. Bitte das Passwort für den neuen Zugang eingeben."
 LIEFERZEIT_FENSTER = "Die Lieferzeit muss zwischen 17:00 und 23:00 liegen."
 ABRAEUMEN_OFFEN = "Das Kapitel konnte nicht entfernt werden. Die App versucht es am 25.12. erneut."
+RAHMEN_HOECHSTENS_SEKUNDEN = 60
+ADRESSE_FALSCH = (
+    "Die Adresse muss mit https:// beginnen und darf keinen Pfad haben, "
+    "z. B. https://advent.vorlesezeit.app."
+)
 
 FELD_NAMEN = {
     "smtp_host": "Server",
@@ -227,6 +239,8 @@ def _page(
     eingaben: dict | None = None,
 ) -> HTMLResponse:
     fehler = fehler or {}
+    # U6 lernt die Adresse erst in render(); vorher lernen, damit das Feld sie schon zeigt.
+    settings.remember_public_address(db, request.url)
     row = settings.get_einstellungen(db)
     data = settings.herkunft(db)
     smtp = _hinweise(data, SMTP_FELDER)
@@ -276,6 +290,11 @@ def _page(
             "name_hinweise": _hinweise(data, ("admin_display_name",)),
             "display_name": row.admin_display_name or "",
             "kind_name": row.kind_name or "",
+            "rahmen_aus": row.rahmen_aus,
+            "oeffentliche_adresse": row.oeffentliche_adresse or "",
+            "version": app.__version__,
+            "versionsstand": update_hinweis.versionsstand(),
+            "neuester_tag": update_hinweis.neuester_tag(),
             "fehler": fehler,
             "eingaben": eingaben or {},
             "mask_email": mask_email,
@@ -332,9 +351,12 @@ def rename_calendar_route(
     calendar_id: int,
     request: Request,
     name: str = Form(""),
+    kind_name: str = Form(""),
     db: Session = Depends(get_db),
     _admin=Depends(setup_admin),
 ):
+    """Name und Kindername des Kalenders (R15); leerer Kindername: es gilt
+    der aus "Namen"."""
     calendar = db.get(Campaign, calendar_id)
     if calendar is None:
         raise HTTPException(status_code=404)
@@ -343,8 +365,9 @@ def rename_calendar_route(
         flash(request, "Ein Kalender braucht einen Namen.", "err")
     else:
         calendar.name = name
+        calendar.kind_name = kind_name.strip() or None
         db.commit()
-        flash(request, f"Kalender heißt jetzt „{name}“.")
+        flash(request, "Kalender gespeichert.")
     return redirect(f"{PAGE}#s-kal")
 
 
@@ -379,11 +402,12 @@ def drafts_after_delete(db: Session, calendar: Campaign) -> list[Auftrag]:
 PLATZHALTER_LAEUFE = ("manuell", "abraeumen", "aufraeumen")
 
 
-def delete_calendar(db: Session, calendar: Campaign) -> None:
-    """Kalender komplett loeschen: Tage und Verlauf gehen, Auftraege nur hier
-    werden Entwurf, Aufnahmen bleiben. Ist er der Platzhalter, wandern die
-    Laeufe ohne Tagesbezug zum naechsten Kalender, dem neuen Platzhalter
-    (Heuristik, Nutzerentscheidung 2026-10-03)."""
+def delete_calendar(db: Session, calendar: Campaign, storage: ObjectStorage) -> None:
+    """Kalender komplett loeschen: Tage, Verlauf und Rahmen-Dateien gehen,
+    Auftraege nur hier werden Entwurf, Aufnahmen bleiben. Ist er der
+    Platzhalter, wandern die Laeufe ohne Tagesbezug zum naechsten Kalender,
+    dem neuen Platzhalter (Heuristik, Nutzerentscheidung 2026-10-03)."""
+    rahmen_keys = [k for k in (calendar.vorspann_key, calendar.abspann_key) if k]
     ids = db.scalars(select(Campaign.id).order_by(Campaign.id)).all()
     successor = next(i for i in ids if i != calendar.id)
     for run in db.scalars(select(DeliveryRun).where(DeliveryRun.campaign_id == calendar.id)):
@@ -395,6 +419,8 @@ def delete_calendar(db: Session, calendar: Campaign) -> None:
         db.delete(slot)
     db.delete(calendar)
     db.commit()
+    for key in rahmen_keys:
+        delete_quietly(storage, key)
 
 
 @router.get("/kalender/{calendar_id}/loeschen", response_class=HTMLResponse)
@@ -430,7 +456,7 @@ def delete_calendar_route(
         flash(request, blocker, "err")
     else:
         name = calendar.name
-        delete_calendar(db, calendar)
+        delete_calendar(db, calendar, request.app.state.storage)
         flash(request, f"Kalender „{name}“ ist gelöscht.")
     return redirect(f"{PAGE}#s-kal")
 
@@ -941,3 +967,233 @@ def name_route(
     settings.set_value(db, "kind_name", kind_name.strip() or None, now=now)
     flash(request, "Namen gespeichert.")
     return redirect(f"{PAGE}#s-name")
+
+
+# --- Rahmen je Kalender (Advent U3: R4, R5) ---------------------------------------------
+
+
+def _minuten(seconds: float) -> str:
+    total = round(seconds)
+    return f"{total // 60}:{total % 60:02d}"
+
+
+def _rahmen_upload(request: Request, db: Session, calendar_id: int, teil: str, file: UploadFile):
+    """Vorspann oder Abspann hochladen: normalisiert wie eine Aufnahme,
+    hoechstens RAHMEN_HOECHSTENS_SEKUNDEN lang. Bei jeder Ablehnung bleiben
+    Kalender und Speicher unveraendert; eine ersetzte Datei geht nach dem
+    Commit."""
+    calendar = _calendar(db, calendar_id)
+    back = redirect(f"{PAGE}#s-kal")
+    raw = file.file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        flash(request, "Die Datei ist zu groß.", "err")
+        return back
+    if not raw:
+        flash(request, "Die Datei ist leer.", "err")
+        return back
+    try:
+        normalized = normalize_recording(raw)
+        seconds = probe_duration_seconds(normalized)
+    except EmptyRecordingError:
+        flash(request, "Die Datei lässt sich nicht als Audio lesen.", "err")
+        return back
+    except Exception:
+        logger.exception("Rahmen-Upload nicht lesbar: kalender=%s teil=%s", calendar.id, teil)
+        flash(request, "Die Datei lässt sich nicht als Audio lesen.", "err")
+        return back
+    if seconds > RAHMEN_HOECHSTENS_SEKUNDEN:
+        flash(
+            request,
+            f"Die Datei ist {_minuten(seconds)} lang. Vorspann und Abspann dürfen "
+            f"höchstens {RAHMEN_HOECHSTENS_SEKUNDEN} Sekunden lang sein.",
+            "err",
+        )
+        return back
+
+    storage = request.app.state.storage
+    key = f"rahmen/{calendar.id}/{uuid.uuid4().hex}.mp3"
+    try:
+        storage.put(key, normalized, content_type="audio/mpeg")
+    except Exception:
+        logger.exception("Rahmen-Upload nicht gespeichert: kalender=%s", calendar.id)
+        flash(request, "Die Datei lässt sich gerade nicht speichern.", "err")
+        return back
+    old = getattr(calendar, f"{teil}_key")
+    setattr(calendar, f"{teil}_key", key)
+    if teil == "vorspann":
+        calendar.vorspann_aus = False
+    commit_or_discard(db, storage, key)
+    if old:
+        delete_quietly(storage, old)
+    flash(request, f"{teil.capitalize()} für „{calendar.name}“ gespeichert.")
+    return back
+
+
+@router.post("/kalender/{calendar_id}/vorspann", response_class=HTMLResponse)
+def vorspann_upload_route(
+    calendar_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _admin=Depends(setup_admin),
+):
+    return _rahmen_upload(request, db, calendar_id, "vorspann", file)
+
+
+@router.post("/kalender/{calendar_id}/abspann", response_class=HTMLResponse)
+def abspann_upload_route(
+    calendar_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _admin=Depends(setup_admin),
+):
+    return _rahmen_upload(request, db, calendar_id, "abspann", file)
+
+
+def _rahmen_entfernen(request: Request, db: Session, calendar: Campaign, teil: str) -> None:
+    old = getattr(calendar, f"{teil}_key")
+    setattr(calendar, f"{teil}_key", None)
+    db.commit()
+    if old:
+        delete_quietly(request.app.state.storage, old)
+
+
+@router.post("/kalender/{calendar_id}/vorspann/entfernen", response_class=HTMLResponse)
+def vorspann_remove_route(
+    calendar_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin=Depends(setup_admin),
+):
+    calendar = _calendar(db, calendar_id)
+    _rahmen_entfernen(request, db, calendar, "vorspann")
+    flash(request, f"Eigener Vorspann für „{calendar.name}“ entfernt. Es gilt wieder die Melodie.")
+    return redirect(f"{PAGE}#s-kal")
+
+
+@router.post("/kalender/{calendar_id}/abspann/entfernen", response_class=HTMLResponse)
+def abspann_remove_route(
+    calendar_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin=Depends(setup_admin),
+):
+    calendar = _calendar(db, calendar_id)
+    _rahmen_entfernen(request, db, calendar, "abspann")
+    flash(request, f"Abspann für „{calendar.name}“ entfernt.")
+    return redirect(f"{PAGE}#s-kal")
+
+
+@router.post("/kalender/{calendar_id}/vorspann/schalter", response_class=HTMLResponse)
+def vorspann_switch_route(
+    calendar_id: int,
+    request: Request,
+    aus: str = Form("0"),
+    db: Session = Depends(get_db),
+    _admin=Depends(setup_admin),
+):
+    """Schaltet nur den Vorspann; die eigene Datei bleibt (R4)."""
+    calendar = _calendar(db, calendar_id)
+    calendar.vorspann_aus = aus == "1"
+    db.commit()
+    stellung = "ausgeschaltet" if calendar.vorspann_aus else "eingeschaltet"
+    flash(request, f"Vorspann für „{calendar.name}“ {stellung}.")
+    return redirect(f"{PAGE}#s-kal")
+
+
+def _rahmen_audio(request: Request, key: str | None):
+    if not key:
+        raise HTTPException(status_code=404)
+    return audio_response(request.app.state.storage, key, request.headers.get("range"))
+
+
+@router.get("/kalender/{calendar_id}/vorspann/audio")
+def vorspann_audio(
+    calendar_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return _rahmen_audio(request, _calendar(db, calendar_id).vorspann_key)
+
+
+@router.get("/kalender/{calendar_id}/abspann/audio")
+def abspann_audio(
+    calendar_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return _rahmen_audio(request, _calendar(db, calendar_id).abspann_key)
+
+
+@router.get("/melodie/audio")
+def melodie_audio(request: Request, _admin=Depends(require_admin)):
+    """Die mitgelieferte Melodie; fehlt sie im Speicher, wird sie erzeugt."""
+    storage = request.app.state.storage
+    melodie(storage)
+    return audio_response(storage, MELODIE_KEY, request.headers.get("range"))
+
+
+# --- Notschalter (R11, KTD5) -------------------------------------------------------------
+
+
+@router.post("/rahmen", response_class=HTMLResponse)
+def rahmen_route(
+    request: Request,
+    rahmen_aus: str = Form(""),
+    db: Session = Depends(get_db),
+    _admin=Depends(setup_admin),
+):
+    """Rahmen in allen Kalendern aus; Dateien und Kalenderfelder bleiben."""
+    row = settings.get_einstellungen(db)
+    row.rahmen_aus = rahmen_aus == "1"
+    db.commit()
+    flash(request, "Rahmen in diesem Advent aus." if row.rahmen_aus else "Rahmen läuft wieder.")
+    return redirect(f"{PAGE}#s-rahmen")
+
+
+# --- Oeffentliche Adresse (KTD9, R20) ----------------------------------------------------
+
+
+def adresse_pruefen(value: str) -> str:
+    """`https://<host>[:<port>]` oder ValueError: nur https, ein Hostname,
+    kein Pfad ausser einem `/` am Ende, keine Query, kein Fragment, keine
+    Zugangsdaten."""
+    if any(c.isspace() for c in value) or "?" in value or "#" in value:
+        raise ValueError(value)
+    parts = urlsplit(value)
+    port = parts.port  # ValueError bei ungueltigem Port
+    if (
+        parts.scheme != "https"
+        or not parts.hostname
+        or parts.path not in ("", "/")
+        or parts.username is not None
+    ):
+        raise ValueError(value)
+    return f"https://{parts.hostname}" + (f":{port}" if port is not None else "")
+
+
+@router.post("/adresse", response_class=HTMLResponse)
+def adresse_route(
+    request: Request,
+    oeffentliche_adresse: str = Form(""),
+    db: Session = Depends(get_db),
+    _admin=Depends(setup_admin),
+):
+    value = oeffentliche_adresse.strip()
+    row = settings.get_einstellungen(db)
+    if not value:
+        row.oeffentliche_adresse = None
+        db.commit()
+        flash(request, "Adresse gelöscht.")
+        return redirect(f"{PAGE}#s-adresse")
+    try:
+        row.oeffentliche_adresse = adresse_pruefen(value)
+    except ValueError:
+        flash(request, ADRESSE_FALSCH, "err")
+        return redirect(f"{PAGE}#s-adresse")
+    db.commit()
+    flash(request, "Adresse gespeichert.")
+    return redirect(f"{PAGE}#s-adresse")

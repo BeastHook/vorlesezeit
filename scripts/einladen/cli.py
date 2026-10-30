@@ -2,13 +2,14 @@
 
 Läuft beim Organisator, nie im Container:
 
-    python -m scripts.einladen neu <name>
+    python -m scripts.einladen neu <name> <admin-mail>
     python -m scripts.einladen liste
     python -m scripts.einladen widerrufen <name>
     python -m scripts.einladen testen
 
-Zugang über CLOUDFLARE_API_TOKEN (Konto: Cloudflare Tunnel Bearbeiten, Zone:
-DNS Bearbeiten), CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_ZONE_ID; optional
+Zugang über CLOUDFLARE_API_TOKEN (Konto: Cloudflare Tunnel Bearbeiten, Konto:
+Email Routing Addresses Lesen, Zone: DNS Bearbeiten, Zone: Email Routing Rules
+Bearbeiten), CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_ZONE_ID; optional
 BREVO_SMTP_LOGIN. Brevo-SMTP-Schlüssel lassen sich nicht per API anlegen: im
 Dashboard unter SMTP & API > SMTP je Freund einen erzeugen und bei `neu`
 verdeckt eingeben. Bestehende DNS-Einträge fasst das Skript nie an.
@@ -38,6 +39,7 @@ BREVO_PORT = 587
 MERKLISTE = Path.home() / ".vorlesezeit" / "einladungen.json"
 RESERVIERT = {"advent", "www", "mail", "smtp", "api", "admin", "app", "status"}
 _NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$")
+_MAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PFLICHT = ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_ZONE_ID")
 CLOUDFLARED_IMAGE = (
     "cloudflare/cloudflared@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c"
@@ -70,14 +72,43 @@ def _schreib(merkliste: Path, daten: dict) -> None:
     tmp.replace(merkliste)
 
 
-def neu(name, *, cf, merkliste: Path, smtp_login: str | None, frage_schluessel=getpass.getpass):
+def _eigene_regeln(cf, absender: str, admin_mail: str) -> list:
+    return [r for r in cf.mailregeln() if r.an == absender and admin_mail in r.ziele]
+
+
+def neu(
+    name,
+    admin_mail,
+    *,
+    cf,
+    merkliste: Path,
+    smtp_login: str | None,
+    frage_schluessel=getpass.getpass,
+):
     name = pruefe_name(name)
+    admin_mail = admin_mail.strip().lower()
+    if not _MAIL.match(admin_mail):
+        raise EinladenError(f"Die Admin-Mail „{admin_mail}“ ist keine gültige Adresse.")
     host = f"{name}.{ZONE}"
+    absender = f"{name}@{ZONE}"
     eintraege = _lies(merkliste)
     if name in eintraege:
         raise EinladenError(f"Eine Einladung für „{name}“ gibt es schon.")
     if cf.dns_eintraege(host):
         raise EinladenError(f"{host} ist schon belegt; bestehende Einträge bleiben unberührt.")
+    if any(r.an == absender for r in cf.mailregeln()):
+        raise EinladenError(f"Es gibt schon eine Mailregel für {absender}.")
+    adresse = next((a for a in cf.zieladressen() if a.email.lower() == admin_mail), None)
+    if adresse is None:
+        raise EinladenError(
+            f"Die Admin-Mail {admin_mail} fehlt in Cloudflare. Bitte unter Email Routing > "
+            "Zieladressen anlegen und die Bestätigungsmail bestätigen."
+        )
+    if not adresse.bestaetigt:
+        raise EinladenError(
+            f"Die Admin-Mail {admin_mail} ist in Cloudflare nicht bestätigt. "
+            "Bitte die Bestätigungsmail bestätigen."
+        )
 
     # Vor dem ersten Anlegen fragen: ein Abbruch hier hinterlässt nichts.
     smtp = None
@@ -88,14 +119,21 @@ def neu(name, *, cf, merkliste: Path, smtp_login: str | None, frage_schluessel=g
 
     tunnel_id = cf.tunnel_anlegen(f"vorlesezeit-{name}")
     dns_id = None
+    regel_id = None
     try:
         cf.weiterleitung_setzen(tunnel_id, host)
         dns_id = cf.cname_anlegen(host, tunnel_id)
+        regel_id = cf.mailregel_anlegen(absender, admin_mail)
         code = encode(Einladung(host=host, tunnel_token=cf.tunnel_token(tunnel_id), smtp=smtp))
     except BaseException:
         # Nicht auf dns_id verlassen: Cloudflare kann den Eintrag angelegt
         # haben, obwohl die Antwort scheiterte. Das Ziel trifft nur den eben
         # angelegten Tunnel. Jeder Schritt einzeln, der Ursprungsfehler bleibt.
+        try:
+            for regel in _eigene_regeln(cf, absender, admin_mail):
+                cf.mailregel_loeschen(regel.id)
+        except Exception:
+            print(f"Bitte im Dashboard löschen: Mailregel {absender}", file=sys.stderr)
         ziel = f"{tunnel_id}.cfargotunnel.com"
         try:
             for eintrag in cf.dns_eintraege(host):
@@ -112,6 +150,8 @@ def neu(name, *, cf, merkliste: Path, smtp_login: str | None, frage_schluessel=g
         "host": host,
         "tunnel_id": tunnel_id,
         "dns_id": dns_id,
+        "admin_mail": admin_mail,
+        "regel_id": regel_id,
         "angelegt": date.today().isoformat(),
     }
     _schreib(merkliste, eintraege)
@@ -141,6 +181,9 @@ def widerrufen(name, *, cf, merkliste: Path) -> None:
     if name not in eintraege:
         raise EinladenError(f"Für „{name}“ gibt es keine Einladung.")
     e = eintraege[name]
+    if e.get("admin_mail"):
+        for regel in _eigene_regeln(cf, f"{name}@{ZONE}", e["admin_mail"]):
+            cf.mailregel_loeschen(regel.id)
     ziel = f"{e['tunnel_id']}.cfargotunnel.com"
     for eintrag in cf.dns_eintraege(e["host"]):
         if eintrag.type == "CNAME" and eintrag.content == ziel:
@@ -221,7 +264,9 @@ def _cloudflare() -> Cloudflare | None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Einladungen für befreundete Instanzen.")
     sub = parser.add_subparsers(dest="befehl", required=True)
-    sub.add_parser("neu").add_argument("name")
+    p_neu = sub.add_parser("neu")
+    p_neu.add_argument("name")
+    p_neu.add_argument("admin_mail")
     sub.add_parser("liste")
     sub.add_parser("widerrufen").add_argument("name")
     sub.add_parser("testen")
@@ -241,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.befehl == "neu":
             code = neu(
                 args.name,
+                args.admin_mail,
                 cf=cf,
                 merkliste=MERKLISTE,
                 smtp_login=os.environ.get("BREVO_SMTP_LOGIN") or None,

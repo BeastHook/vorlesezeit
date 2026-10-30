@@ -27,6 +27,20 @@ class DnsEintrag:
     content: str
 
 
+@dataclass(frozen=True)
+class Zieladresse:
+    id: str
+    email: str
+    bestaetigt: bool
+
+
+@dataclass(frozen=True)
+class Mailregel:
+    id: str
+    an: str | None
+    ziele: tuple[str, ...]
+
+
 class Cloudflare:
     def __init__(
         self,
@@ -44,6 +58,8 @@ class Cloudflare:
         )
         self._tunnel = f"/accounts/{account_id}/cfd_tunnel"
         self._dns = f"/zones/{zone_id}/dns_records"
+        self._adressen = f"/accounts/{account_id}/email/routing/addresses"
+        self._regeln = f"/zones/{zone_id}/email/routing/rules"
 
     def _call(self, method: str, path: str, **kwargs) -> object:
         response = self._http.request(method, path, **kwargs)
@@ -101,3 +117,44 @@ class Cloudflare:
 
     def dns_loeschen(self, eintrag_id: str) -> None:
         self._call("DELETE", f"{self._dns}/{eintrag_id}")
+
+    def zieladressen(self) -> list[Zieladresse]:
+        result = self._call("GET", self._adressen, params={"per_page": 50})
+        return [Zieladresse(r["id"], r["email"], bool(r.get("verified"))) for r in result]
+
+    def mailregeln(self) -> list[Mailregel]:
+        result = self._call("GET", self._regeln, params={"per_page": 50})
+        regeln = []
+        for r in result:
+            an = next(
+                (
+                    m.get("value")
+                    for m in r.get("matchers") or []
+                    if m.get("type") == "literal" and m.get("field") == "to"
+                ),
+                None,
+            )
+            ziele = tuple(
+                v
+                for a in r.get("actions") or []
+                if a.get("type") == "forward"
+                for v in a.get("value") or []
+            )
+            regeln.append(Mailregel(r["id"], an, ziele))
+        return regeln
+
+    def mailregel_anlegen(self, adresse: str, ziel: str) -> str:
+        result = self._call(
+            "POST",
+            self._regeln,
+            json={
+                "name": adresse,
+                "enabled": True,
+                "matchers": [{"type": "literal", "field": "to", "value": adresse}],
+                "actions": [{"type": "forward", "value": [ziel]}],
+            },
+        )
+        return result["id"]
+
+    def mailregel_loeschen(self, regel_id: str) -> None:
+        self._call("DELETE", f"{self._regeln}/{regel_id}")

@@ -42,6 +42,7 @@ from app.delivery.chapters import (
     stock_loss,
     stock_of,
 )
+from app.delivery.rahmen import RahmenFehler, mit_rahmen
 from app.models import Beitrag, Campaign, CreativeTonie, DeliveryRun, Slot
 from app.storage import ObjectStorage
 from app.toniecloud.client import (
@@ -55,7 +56,7 @@ from app.toniecloud.client import (
     validate_format,
     verify_upload,
 )
-from app.toniecloud.models import Chapter, CreativeTonieState
+from app.toniecloud.models import Chapter, ConfigLimits, CreativeTonieState
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,14 @@ RUN_STARTED = "gestartet"
 RUN_ABORTED = "abgebrochen"
 # Schluessel in Session.info: der offene Eintrag, den `_record` abschliesst.
 _OPEN_ENTRY = "delivery_open_entry"
+
+# Advent U5 (R9, R19): Hinweise in `reason`, wenn ein Beitrag ohne Rahmen rausgeht.
+HINWEIS_RAHMEN_BAU = "Ohne Rahmen ausgeliefert: Der Rahmen ließ sich nicht bauen."
+HINWEIS_RAHMEN_PLATZ = "Ohne Rahmen ausgeliefert: Für den Rahmen fehlt Platz auf dem Tonie."
+HINWEIS_RAHMEN_ABGELEHNT = (
+    "Ohne Rahmen ausgeliefert: Die Toniecloud hat das Kapitel mit Rahmen abgelehnt ({grund})."
+)
+HINWEIS_PROBE_OHNE_RAHMEN = "Rahmen ließ sich nicht bauen, Datei ohne Rahmen hochgeladen."
 
 
 @dataclass
@@ -222,6 +231,13 @@ def run_in_background(
 
 def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
+
+
+def _with_note(reason: str | None, note: str | None) -> str | None:
+    """Haengt einen Hinweis mit " · " an `reason` (wie `_report`)."""
+    if note is None:
+        return reason
+    return f"{reason} · {note}" if reason else note
 
 
 def _error_detail(exc: BaseException) -> str:
@@ -446,7 +462,7 @@ def _run_locked(
         )
 
     attempt = _attempt_single_chapter(
-        client, storage, beitrag, slot, household_id, tonie_id, baseline, app
+        db, client, storage, campaign, beitrag, slot, household_id, tonie_id, baseline, app
     )
     any_patch_happened = attempt.patched
 
@@ -458,7 +474,7 @@ def _run_locked(
             run_type,
             target_day,
             True,
-            missing_reason if used_replacement else None,
+            _with_note(missing_reason if used_replacement else None, attempt.note),
             used_beitrag_id=beitrag.id,
             used_replacement=used_replacement,
             title_mismatches=attempt.title_mismatches,
@@ -467,8 +483,25 @@ def _run_locked(
 
     rep_beitrag = None if used_replacement else _usable_replacement(db, campaign)
     if rep_beitrag is not None:
+        # KTD4: hat die Toniecloud die Tagesgeschichte mit Rahmen abgelehnt,
+        # geht der Ersatzbeitrag gleich ohne Rahmen -- hoechstens drei Uploads.
+        ohne_rahmen = (
+            HINWEIS_RAHMEN_ABGELEHNT.format(grund=attempt.frame_rejection)
+            if attempt.frame_rejection is not None
+            else None
+        )
         attempt2 = _attempt_single_chapter(
-            client, storage, rep_beitrag, None, household_id, tonie_id, baseline, app
+            db,
+            client,
+            storage,
+            campaign,
+            rep_beitrag,
+            None,
+            household_id,
+            tonie_id,
+            baseline,
+            app,
+            ohne_rahmen=ohne_rahmen,
         )
         any_patch_happened = any_patch_happened or attempt2.patched
         if attempt2.success:
@@ -479,7 +512,10 @@ def _run_locked(
                 run_type,
                 target_day,
                 True,
-                f"Tagesbeitrag fehlgeschlagen ({attempt.reason}); Ersatzbeitrag ausgeliefert.",
+                _with_note(
+                    f"Tagesbeitrag fehlgeschlagen ({attempt.reason}); Ersatzbeitrag ausgeliefert.",
+                    attempt2.note,
+                ),
                 used_beitrag_id=rep_beitrag.id,
                 used_replacement=True,
                 title_mismatches=attempt2.title_mismatches,
@@ -602,11 +638,100 @@ class _AttemptResult:
     patched: bool  # ob ueberhaupt ein PATCH stattfand -- entscheidet, ob ein Rollback noetig ist
     title_mismatches: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     seconds: float | None = None  # Dauer des aufgespielten Kapitels (U16, Platzrechnung)
+    # Advent U5: Platz war da, danach scheiterte Hochladen, Ersetzen,
+    # Verarbeiten oder Pruefen -- die Toniecloud hat das Kapitel abgelehnt.
+    rejected: bool = False
+    note: str | None = None  # Hinweis "ohne Rahmen" fuer `reason`
+    frame_rejection: str | None = None  # Grund, wenn das Kapitel mit Rahmen abgelehnt wurde
+
+
+def _failed_attempt(exc: Exception, *, rejected: bool) -> _AttemptResult:
+    if isinstance(exc, TermsOfUseRequiredError):
+        reason = "Nutzungsbedingungen muessen erneut bestaetigt werden."
+    elif isinstance(exc, UnsupportedFormatError):
+        reason = f"Format abgelehnt: {exc}"
+    else:
+        # U11: auch Speicher-, ffmpeg- und HTTP-Fehler sind ein gescheiterter
+        # Versuch -- danach darf der Ersatzbeitrag einspringen bzw. der
+        # Rueckfallstand zurueck, statt dass der Lauf ohne Aufraeumen abbricht.
+        reason = f"Hochladen fehlgeschlagen: {_error_detail(exc)}"
+    return _AttemptResult(False, reason, None, False, rejected=rejected)
 
 
 def _attempt_single_chapter(
+    db: Session,
     client: TonieCloudClient,
     storage: ObjectStorage,
+    campaign: Campaign,
+    beitrag: Beitrag,
+    slot: Slot | None,
+    household_id: str,
+    tonie_id: str,
+    baseline: CreativeTonieState,
+    app: Sequence[AppChapter],
+    *,
+    ohne_rahmen: str | None = None,
+) -> _AttemptResult:
+    """Ein Beitrag nach der Kaskade aus KTD4: erst mit Rahmen, scheitert das,
+    dieselbe Geschichte ohne Rahmen. Scheitern Laden oder Zuschnitt, liegt es
+    nicht am Rahmen -- dann kein zweiter Versuch. `ohne_rahmen` ist der
+    Hinweis, mit dem der Beitrag gleich ohne Rahmen rausgeht."""
+    try:
+        limits = client.get_config()
+        data = storage.get(beitrag.audio_object_key)
+        data = apply_cut(
+            data, start_seconds=beitrag.cut_start_seconds, end_seconds=beitrag.cut_end_seconds
+        )
+        seconds = probe_duration_seconds(data)
+    except Exception as exc:
+        return _failed_attempt(exc, rejected=False)
+
+    def upload(audio: bytes, audio_seconds: float) -> _AttemptResult:
+        return _upload_chapter(
+            client,
+            limits,
+            audio,
+            audio_seconds,
+            beitrag,
+            slot,
+            household_id,
+            tonie_id,
+            baseline,
+            app,
+        )
+
+    note = ohne_rahmen
+    if note is None:
+        try:
+            framed = mit_rahmen(db, storage, campaign, data)
+            framed_seconds = probe_duration_seconds(framed) if framed is not None else None
+        except Exception:
+            logger.warning("Rahmen nicht gebaut: beitrag=%s", beitrag.id, exc_info=True)
+            framed, note = None, HINWEIS_RAHMEN_BAU
+        if framed is not None:
+            first = upload(framed, framed_seconds)
+            if first.success:
+                return first
+            if first.rejected:
+                note = HINWEIS_RAHMEN_ABGELEHNT.format(grund=first.reason)
+            else:
+                note = HINWEIS_RAHMEN_PLATZ
+            second = upload(data, seconds)
+            second.patched = second.patched or first.patched
+            second.frame_rejection = first.reason if first.rejected else None
+            second.note = note
+            return second
+
+    result = upload(data, seconds)
+    result.note = note
+    return result
+
+
+def _upload_chapter(
+    client: TonieCloudClient,
+    limits: ConfigLimits,
+    data: bytes,
+    seconds: float,
     beitrag: Beitrag,
     slot: Slot | None,
     household_id: str,
@@ -617,33 +742,16 @@ def _attempt_single_chapter(
     """Ersetzt die App-Kapitel durch genau ein neues an Platz 1; der Bestand
     aus dem Rueckfallstand bleibt unveraendert dahinter (U16, R49). Zu wenig
     Platz wird vor dem Hochladen erkannt -- dann kein Upload, kein PATCH (R50)."""
+    space_reason = missing_space(space_for(baseline, app, limits), [seconds])
+    if space_reason is not None:
+        return _AttemptResult(False, space_reason, None, False)
     try:
-        limits = client.get_config()
-        data = storage.get(beitrag.audio_object_key)
-        data = apply_cut(
-            data, start_seconds=beitrag.cut_start_seconds, end_seconds=beitrag.cut_end_seconds
-        )
-        seconds = probe_duration_seconds(data)
-        space_reason = missing_space(space_for(baseline, app, limits), [seconds])
-        if space_reason is not None:
-            return _AttemptResult(False, space_reason, None, False)
         filename = f"beitrag-{beitrag.id}.mp3"
         validate_format(filename, limits)
         target = client.create_file()
         client.upload_bytes(target, data, filename=filename, content_type="audio/mpeg")
-    except TermsOfUseRequiredError:
-        return _AttemptResult(
-            False, "Nutzungsbedingungen muessen erneut bestaetigt werden.", None, False
-        )
-    except UnsupportedFormatError as exc:
-        return _AttemptResult(False, f"Format abgelehnt: {exc}", None, False)
-    except TonieCloudError as exc:
-        return _AttemptResult(False, f"Hochladen fehlgeschlagen: {exc}", None, False)
     except Exception as exc:
-        # U11: auch Speicher-, ffmpeg- und HTTP-Fehler sind ein gescheiterter
-        # Versuch -- danach darf der Ersatzbeitrag einspringen bzw. der
-        # Rueckfallstand zurueck, statt dass der Lauf ohne Aufraeumen abbricht.
-        return _AttemptResult(False, f"Hochladen fehlgeschlagen: {_describe(exc)}", None, False)
+        return _failed_attempt(exc, rejected=True)
 
     title = chapter_title_for(beitrag, slot)
     stock = stock_of(baseline, app)
@@ -652,14 +760,14 @@ def _attempt_single_chapter(
             household_id, tonie_id, [Chapter(title=title, file=target.file_id), *stock]
         )
         final_state = client.wait_until_processed(household_id, tonie_id)
-    except TonieCloudError as exc:
-        return _AttemptResult(False, f"Ersetzen fehlgeschlagen: {exc}", None, True)
     except Exception as exc:
-        return _AttemptResult(False, f"Ersetzen fehlgeschlagen: {_describe(exc)}", None, True)
+        return _AttemptResult(
+            False, f"Ersetzen fehlgeschlagen: {_error_detail(exc)}", None, True, rejected=True
+        )
 
     failure, title_mismatches = _verify_with_stock(patch_state, final_state, [title], stock)
     if failure is not None:
-        return _AttemptResult(False, failure, None, True)
+        return _AttemptResult(False, failure, None, True, rejected=True)
 
     chapter_id = final_state.chapters[0].id
     return _AttemptResult(True, None, chapter_id, True, title_mismatches, seconds)
@@ -859,12 +967,19 @@ def _run_dry_run(
         if beitrag is None:
             return _record(db, tonie, run_type, target_day, False, missing_reason)
 
+    note = None
     try:
         limits = client.get_config()
         data = storage.get(beitrag.audio_object_key)
         data = apply_cut(
             data, start_seconds=beitrag.cut_start_seconds, end_seconds=beitrag.cut_end_seconds
         )
+        # KTD5: der Lauf prueft die Datei mit Rahmen, damit ein kaputter
+        # Rahmen vor dem 1.12. auffaellt -- ohne zweiten Versuch ohne Rahmen.
+        try:
+            data = mit_rahmen(db, storage, campaign, data) or data
+        except RahmenFehler:
+            note = HINWEIS_PROBE_OHNE_RAHMEN
         filename = f"beitrag-{beitrag.id}.mp3"
         validate_format(filename, limits)
         target = client.create_file()
@@ -879,8 +994,11 @@ def _run_dry_run(
         run_type,
         target_day,
         True,
-        f"{label}: Zugang, Formatvorpruefung und 409-Fall geprueft -- "
-        "Verarbeitung und Kapitelliste NICHT geprueft (kein Ersetzen).",
+        _with_note(
+            f"{label}: Zugang, Formatvorpruefung und 409-Fall geprueft -- "
+            "Verarbeitung und Kapitelliste NICHT geprueft (kein Ersetzen).",
+            note,
+        ),
         used_beitrag_id=beitrag.id,
         used_replacement=used_replacement,
     )

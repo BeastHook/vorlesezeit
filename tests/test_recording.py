@@ -877,11 +877,39 @@ def test_auftrag_page_folds_file_upload_into_closed_details(
     )
 
 
-def test_free_recording_has_no_file_upload(person_client: TestClient):
+def test_free_recording_offers_folded_file_upload(person_client: TestClient):
     html = person_client.get("/record/free").text
 
-    assert 'data-role="file-input"' not in html
-    assert 'data-role="upload-btn"' not in html
+    assert "upload-details" in html
+    assert 'data-role="file-input"' in html
+    assert 'accept="audio/*"' in html
+    assert 'data-role="upload-btn"' in html
+    assert (
+        html.index('data-state="idle"')
+        < html.index("upload-details")
+        < html.index('data-state="recording"')
+    )
+    details = html.split('data-role="file-input"')[0].rsplit("<details", 1)[1]
+    assert "open" not in details.split(">")[0]
+    summary = details.split("<summary", 1)[1].split("</summary>")[0]
+    assert "Datei" in summary
+
+
+def test_uploaded_mp3_file_creates_free_beitrag(person_client: TestClient, db_session: Session):
+    person = _current_person(db_session)
+
+    response = person_client.post(
+        "/record/free",
+        files={"audio": ("nachricht.mp3", make_tone_mp3(seconds=1.0), "audio/mpeg")},
+        data={"title": "Grüße", "reported_type": "audio/mpeg"},
+    )
+
+    assert response.status_code == 200
+    assert "next_url" in response.json()
+    beitrag = db_session.execute(
+        select(Beitrag).where(Beitrag.person_id == person.id, Beitrag.auftrag_id.is_(None))
+    ).scalar_one()
+    assert beitrag.title == "Grüße"
 
 
 def test_uploaded_mp3_file_creates_beitrag(person_client: TestClient, db_session: Session):

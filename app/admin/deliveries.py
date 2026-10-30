@@ -64,6 +64,7 @@ from app.delivery.job import (
     placeholder_campaign_id,
     run_lock,
 )
+from app.delivery.rahmen import RahmenFehler, rahmen_sekunden
 from app.delivery.trigger import (
     dispatch_run,
     evening_of,
@@ -230,19 +231,29 @@ def _start_in_background(
 
 
 def _space_view(
+    db: Session,
     tonie: CreativeTonie,
     deliverable: Sequence[Beitrag],
     client: TonieCloudClient | UnavailableClient,
     storage: ObjectStorage,
 ) -> dict:
     """R50: Bestand und freier Platz aus einem frischen Read; freigegebene
-    Beitraege, die nicht hineinpassen, mit Namen."""
+    Beitraege, die nicht hineinpassen, mit Namen. Advent U5 (R10): jede
+    Laenge mit dem Rahmen des Kalenders dieses Tonie; laesst er sich nicht
+    bauen, ohne Rahmen -- so liefert dann auch der Lauf."""
     household_id = client.find_household_id(tonie.tonie_id)
     state = client.get_state(household_id, tonie.tonie_id)
     space = space_for(state, load_app_chapters(tonie.app_chapters), client.get_config())
+    rahmen, rahmen_error = 0.0, False
+    if tonie.campaign is not None:
+        try:
+            rahmen = rahmen_sekunden(db, storage, tonie.campaign)
+        except RahmenFehler:
+            logger.warning("Rahmen fuer die Platzpruefung nicht gebaut", exc_info=True)
+            rahmen_error = True
     too_long = []
     for beitrag in deliverable:
-        seconds = beitrag_seconds(
+        seconds = rahmen + beitrag_seconds(
             storage.get(beitrag.audio_object_key),
             beitrag.cut_start_seconds,
             beitrag.cut_end_seconds,
@@ -254,6 +265,8 @@ def _space_view(
         "stock_minutes": format_minutes(space.stock_seconds),
         "free_minutes": format_minutes(space.free_seconds),
         "too_long": too_long,
+        "rahmen_minutes": format_minutes(rahmen) if rahmen > 0 else None,
+        "rahmen_error": rahmen_error,
     }
 
 
@@ -329,7 +342,7 @@ def deliveries_page(
     space, space_error = None, None
     if platz and tonie is not None:
         try:
-            space = _space_view(tonie, deliverable, factory.for_tonie(db, tonie), storage)
+            space = _space_view(db, tonie, deliverable, factory.for_tonie(db, tonie), storage)
         except Exception as exc:
             logger.warning("Platzpruefung fehlgeschlagen: %s", exc)
             # Nur Fehler des Toniecloud-Clients liegen an der Toniecloud --

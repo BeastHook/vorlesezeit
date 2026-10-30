@@ -1,0 +1,9 @@
+{{ greeting }}
+
+heute Morgen wartet auf dem Tonie{% if kind %} für {{ kind }}{% endif %} deine Geschichte{% if title %} „{{ title }}“{% endif %}.
+
+Danke, dass du vorgelesen hast, {% if kind %}das wird {{ kind }} freuen{% else %}das wird eine Freude{% endif %}!
+
+Ab morgen früh kannst du sie im Archiv nachhören, zusammen mit den Geschichten der anderen.
+
+{{ gruss }}

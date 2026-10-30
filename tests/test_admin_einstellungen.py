@@ -22,6 +22,7 @@ from app.admin.setup import new_campaign
 from app.auth.tokens import create_magic_link_token
 from app.crypto import decrypt
 from app.delivery.job import _lock_for, client_for
+from app.delivery.rahmen import mit_rahmen
 from app.delivery.trigger import get_now, get_toniecloud_factory
 from app.mail.smtp import SmtpPruefung
 from app.models import (
@@ -36,7 +37,9 @@ from app.models import (
     Slot,
     TonieKonto,
 )
+from app.storage import ObjectMissing
 from app.toniecloud.client import TonieCloudFactory, check_konto
+from tests.fixtures.audio import make_tone_mp3
 from tests.test_delivery import (
     STOCK,
     TONIE_ID,
@@ -816,6 +819,307 @@ def test_delete_unknown_calendar_is_404(setup_client):
     assert setup_client.post("/admin/setup/kalender/999/loeschen").status_code == 404
 
 
+# --- Advent U3: Kindername, Rahmen, Notschalter, Adresse (R4, R5, R11, R15, KTD9) ---------
+
+
+def _storage(client: TestClient):
+    return client.app.state.storage
+
+
+def _keys(client: TestClient, prefix: str) -> set[str]:
+    storage = _storage(client)
+    listed = storage._client.list_objects_v2(Bucket=storage._bucket, Prefix=prefix)
+    return {o["Key"] for o in listed.get("Contents", [])}
+
+
+def _upload(client: TestClient, calendar: Campaign, teil: str, data: bytes, name="ton.mp3"):
+    return client.post(
+        f"/admin/setup/kalender/{calendar.id}/{teil}",
+        files={"file": (name, data, "audio/mpeg")},
+    )
+
+
+def _fresh(db_session, calendar: Campaign) -> Campaign:
+    db_session.expire_all()
+    return db_session.get(Campaign, calendar.id)
+
+
+def _missing(client: TestClient, key: str) -> bool:
+    try:
+        _storage(client).read(key)
+    except ObjectMissing:
+        return True
+    return False
+
+
+def test_calendar_child_name_is_saved_trimmed_and_shown(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+
+    setup_client.post(
+        f"/admin/setup/kalender/{familie.id}", data={"name": "Familie", "kind_name": " Mila "}
+    )
+
+    familie = _fresh(db_session, familie)
+    assert familie.kind_name == "Mila"
+    assert st.calendar_kind_name(db_session, familie) == "Mila"
+    page = setup_client.get("/admin/setup").text
+    assert f'id="kk{familie.id}" name="kind_name" value="Mila"' in page
+
+
+def test_calendar_child_name_empty_falls_back_to_instance_name(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie", kind_name="Mila")
+    db_session.commit()
+    setup_client.post("/admin/setup/name", data={"admin_display_name": "", "kind_name": "Emma"})
+
+    setup_client.post(
+        f"/admin/setup/kalender/{familie.id}", data={"name": "Familie", "kind_name": "  "}
+    )
+
+    familie = _fresh(db_session, familie)
+    assert familie.kind_name is None
+    assert st.calendar_kind_name(db_session, familie) == "Emma"
+
+
+def test_vorspann_upload_is_normalized_and_playable(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie", vorspann_aus=True)
+    db_session.commit()
+    original = make_tone_mp3(3.0)
+
+    page = _upload(setup_client, familie, "vorspann", original)
+
+    familie = _fresh(db_session, familie)
+    assert familie.vorspann_key.startswith(f"rahmen/{familie.id}/")
+    assert familie.vorspann_aus is False
+    stored = _storage(setup_client).get(familie.vorspann_key)
+    assert stored != original and (stored[:3] == b"ID3" or stored[0] == 0xFF)
+    assert 'class="flash ok"' in page.text and "Vorspann für „Familie“ gespeichert." in page.text
+    assert f'src="/admin/setup/kalender/{familie.id}/vorspann/audio"' in page.text
+    audio = setup_client.get(
+        f"/admin/setup/kalender/{familie.id}/vorspann/audio", headers={"Range": "bytes=0-99"}
+    )
+    assert audio.status_code == 206
+
+
+def test_vorspann_over_60_seconds_is_refused(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+    before = _keys(setup_client, f"rahmen/{familie.id}/")
+
+    page = _upload(setup_client, familie, "vorspann", make_tone_mp3(61.0))
+
+    assert _fresh(db_session, familie).vorspann_key is None
+    assert _keys(setup_client, f"rahmen/{familie.id}/") == before
+    assert 'class="flash err"' in page.text and "höchstens 60 Sekunden" in page.text
+
+
+def test_vorspann_without_audio_is_refused(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+
+    page = _upload(setup_client, familie, "vorspann", b"kein audio", name="test.txt")
+
+    assert _fresh(db_session, familie).vorspann_key is None
+    assert 'class="flash err"' in page.text and "nicht als Audio lesen" in page.text
+
+
+def test_empty_abspann_file_is_refused(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+
+    page = _upload(setup_client, familie, "abspann", b"")
+
+    assert _fresh(db_session, familie).abspann_key is None
+    assert 'class="flash err"' in page.text and "Die Datei ist leer." in page.text
+
+
+def test_second_vorspann_replaces_and_deletes_old_file(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+    _upload(setup_client, familie, "vorspann", make_tone_mp3(2.0))
+    old = _fresh(db_session, familie).vorspann_key
+
+    _upload(setup_client, familie, "vorspann", make_tone_mp3(3.0, 660))
+
+    new = _fresh(db_session, familie).vorspann_key
+    assert new != old and not _missing(setup_client, new)
+    assert _missing(setup_client, old)
+
+
+def test_abspann_upload_and_remove(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+
+    _upload(setup_client, familie, "abspann", make_tone_mp3(2.0))
+    key = _fresh(db_session, familie).abspann_key
+    assert key.startswith(f"rahmen/{familie.id}/")
+    assert setup_client.get(f"/admin/setup/kalender/{familie.id}/abspann/audio").status_code == 200
+
+    page = setup_client.post(f"/admin/setup/kalender/{familie.id}/abspann/entfernen")
+
+    assert _fresh(db_session, familie).abspann_key is None
+    assert _missing(setup_client, key)
+    assert "Abspann für „Familie“ entfernt." in page.text
+    assert setup_client.get(f"/admin/setup/kalender/{familie.id}/abspann/audio").status_code == 404
+
+
+def test_vorspann_switch_keeps_file_and_leaves_no_frame(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+    _upload(setup_client, familie, "vorspann", make_tone_mp3(2.0))
+    key = _fresh(db_session, familie).vorspann_key
+
+    setup_client.post(f"/admin/setup/kalender/{familie.id}/vorspann/schalter", data={"aus": "1"})
+
+    familie = _fresh(db_session, familie)
+    assert familie.vorspann_aus is True and familie.vorspann_key == key
+    assert not _missing(setup_client, key)
+    assert mit_rahmen(db_session, _storage(setup_client), familie, make_tone_mp3(1.0)) is None
+
+    setup_client.post(f"/admin/setup/kalender/{familie.id}/vorspann/schalter", data={"aus": "0"})
+    assert _fresh(db_session, familie).vorspann_aus is False
+
+
+def test_vorspann_remove_deletes_file_and_melody_applies(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+    _upload(setup_client, familie, "vorspann", make_tone_mp3(2.0))
+    key = _fresh(db_session, familie).vorspann_key
+
+    page = setup_client.post(f"/admin/setup/kalender/{familie.id}/vorspann/entfernen")
+
+    familie = _fresh(db_session, familie)
+    assert familie.vorspann_key is None and familie.vorspann_aus is False
+    assert _missing(setup_client, key)
+    assert "Es gilt wieder die Melodie." in page.text
+    assert 'src="/admin/setup/melodie/audio"' in page.text
+
+
+def test_melody_is_playable(setup_client):
+    response = setup_client.get("/admin/setup/melodie/audio")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
+
+
+def test_frame_switch_sets_and_clears_rahmen_aus(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+    _upload(setup_client, familie, "abspann", make_tone_mp3(2.0))
+    before = _fresh(db_session, familie)
+    felder = (before.vorspann_key, before.abspann_key, before.vorspann_aus, before.kind_name)
+
+    page = setup_client.post("/admin/setup/rahmen", data={"rahmen_aus": "1"})
+
+    db_session.expire_all()
+    assert db_session.get(Einstellungen, 1).rahmen_aus is True
+    after = db_session.get(Campaign, familie.id)
+    assert (after.vorspann_key, after.abspann_key, after.vorspann_aus, after.kind_name) == felder
+    assert not _missing(setup_client, after.abspann_key)
+    assert 'name="rahmen_aus" value="1" checked' in page.text
+    assert "Der Rahmen ist aus." in page.text
+
+    setup_client.post("/admin/setup/rahmen", data={})
+    db_session.expire_all()
+    assert db_session.get(Einstellungen, 1).rahmen_aus is False
+
+
+def test_public_address_is_saved_without_trailing_slash(setup_client, db_session):
+    page = setup_client.post(
+        "/admin/setup/adresse", data={"oeffentliche_adresse": "https://advent.vorlesezeit.app/"}
+    )
+
+    db_session.expire_all()
+    assert db_session.get(Einstellungen, 1).oeffentliche_adresse == "https://advent.vorlesezeit.app"
+    assert 'name="oeffentliche_adresse"' in page.text
+    assert 'value="https://advent.vorlesezeit.app"' in page.text
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://advent.vorlesezeit.app",
+        "https://advent.vorlesezeit.app/admin",
+        "advent.vorlesezeit.app",
+    ],
+)
+def test_public_address_invalid_keeps_stored_value(setup_client, db_session, value):
+    setup_client.post("/admin/setup/adresse", data={"oeffentliche_adresse": "https://alt.example"})
+
+    page = setup_client.post("/admin/setup/adresse", data={"oeffentliche_adresse": value})
+
+    db_session.expire_all()
+    assert db_session.get(Einstellungen, 1).oeffentliche_adresse == "https://alt.example"
+    assert 'class="flash err"' in page.text and "https://" in page.text
+
+
+def test_public_address_keeps_port(setup_client, db_session):
+    setup_client.post(
+        "/admin/setup/adresse", data={"oeffentliche_adresse": "https://Advent.example:8443"}
+    )
+
+    db_session.expire_all()
+    assert db_session.get(Einstellungen, 1).oeffentliche_adresse == "https://advent.example:8443"
+
+
+def test_public_address_empty_clears(setup_client, db_session):
+    setup_client.post("/admin/setup/adresse", data={"oeffentliche_adresse": "https://alt.example"})
+
+    setup_client.post("/admin/setup/adresse", data={"oeffentliche_adresse": " "})
+
+    db_session.expire_all()
+    assert db_session.get(Einstellungen, 1).oeffentliche_adresse is None
+
+
+def test_cleared_address_is_learned_again_and_shown_at_once(setup_client, db_session):
+    """U6 lernt die Adresse beim Admin-Aufruf ueber https; das Feld zeigt sie
+    schon auf dieser Seite."""
+    setup_client.post("/admin/setup/adresse", data={"oeffentliche_adresse": "https://alt.example"})
+    setup_client.post("/admin/setup/adresse", data={"oeffentliche_adresse": ""})
+    cookie = f"session={setup_client.cookies.get('session')}"
+
+    page = setup_client.get("https://advent.example/admin/setup", headers={"Cookie": cookie})
+
+    db_session.expire_all()
+    assert db_session.get(Einstellungen, 1).oeffentliche_adresse == "https://advent.example"
+    assert 'value="https://advent.example"' in page.text
+    assert "noch nicht bekannt" not in page.text
+
+
+def test_public_address_with_foreign_origin_is_403_and_unchanged(setup_client, db_session):
+    response = setup_client.post(
+        "/admin/setup/adresse",
+        data={"oeffentliche_adresse": "https://advent.vorlesezeit.app"},
+        headers={"Origin": "https://fremd.example"},
+    )
+
+    assert response.status_code == 403
+    db_session.expire_all()
+    assert db_session.get(Einstellungen, 1).oeffentliche_adresse is None
+
+
+def test_delete_calendar_removes_its_frame_files(setup_client, db_session):
+    familie, berger = _two_calendars(db_session)
+    _upload(setup_client, berger, "vorspann", make_tone_mp3(2.0))
+    _upload(setup_client, berger, "abspann", make_tone_mp3(2.0))
+    berger = _fresh(db_session, berger)
+    keys = (berger.vorspann_key, berger.abspann_key)
+
+    setup_client.post(f"/admin/setup/kalender/{berger.id}/loeschen")
+
+    assert all(_missing(setup_client, k) for k in keys)
+
+
+def test_frame_routes_on_unknown_calendar_are_404(setup_client):
+    upload = setup_client.post(
+        "/admin/setup/kalender/999999/vorspann",
+        files={"file": ("ton.mp3", b"x", "audio/mpeg")},
+    )
+    assert upload.status_code == 404
+    assert setup_client.get("/admin/setup/kalender/999999/vorspann/audio").status_code == 404
+    assert setup_client.post("/admin/setup/kalender/999999/abspann/entfernen").status_code == 404
+
+
 # --- Schutz (KTD13, Admin) ----------------------------------------------------------
 
 POST_ROUTES = [
@@ -830,6 +1134,13 @@ POST_ROUTES = [
     "/admin/setup/smtp",
     "/admin/setup/termine",
     "/admin/setup/name",
+    "/admin/setup/kalender/1/vorspann",
+    "/admin/setup/kalender/1/abspann",
+    "/admin/setup/kalender/1/vorspann/entfernen",
+    "/admin/setup/kalender/1/abspann/entfernen",
+    "/admin/setup/kalender/1/vorspann/schalter",
+    "/admin/setup/rahmen",
+    "/admin/setup/adresse",
 ]
 
 
@@ -861,6 +1172,9 @@ def test_origin_compares_against_forwarded_scheme(admin_client, db_session):
         "/admin/setup/tonies/1/umhaengen?kalender=",
         "/admin/setup/kalender/1/loeschen?",
         "/admin/setup/konten/1/loeschen?",
+        "/admin/setup/melodie/audio?",
+        "/admin/setup/kalender/1/vorspann/audio?",
+        "/admin/setup/kalender/1/abspann/audio?",
     ]
     + POST_ROUTES,
 )

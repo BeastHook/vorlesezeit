@@ -373,6 +373,102 @@ def test_revoke_invalidates_only_affected_person(
     assert confirm_b.status_code == 303
 
 
+# --- Widerruf-Merker (Advent-Anreicherung U6, KTD8) ---------------------------
+
+
+def _revoked(admin_client: TestClient, db_session: Session, person: Person) -> None:
+    admin_client.post(f"/admin/personen/{person.id}/widerrufen")
+    db_session.expire_all()
+    assert db_session.get(Person, person.id).revoked_at is not None
+
+
+def test_revoke_sets_revoked_at_and_bumps_version(
+    admin_client: TestClient, db_session: Session, monkeypatch
+):
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    version = klaus.access_version
+    _freeze_today(monkeypatch, 2026, 11, 3)
+
+    admin_client.post(f"/admin/personen/{klaus.id}/widerrufen")
+
+    db_session.expire_all()
+    klaus = db_session.get(Person, klaus.id)
+    assert klaus.revoked_at.date().isoformat() == "2026-11-03"
+    assert klaus.access_version == version + 1
+
+
+def test_invite_after_revoke_clears_revoked_at_even_if_invited(
+    admin_client: TestClient, db_session: Session, mails
+):
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    klaus.invited_at = datetime(2026, 10, 4, 21, 5)
+    db_session.commit()
+    _revoked(admin_client, db_session, klaus)
+
+    admin_client.post(f"/admin/personen/{klaus.id}/einladen")
+
+    db_session.expire_all()
+    klaus = db_session.get(Person, klaus.id)
+    assert klaus.revoked_at is None
+    assert klaus.invited_at == datetime(2026, 10, 4, 21, 5)
+    assert len(mails["invite"]) == 1
+
+
+def test_reminder_after_revoke_clears_revoked_at(
+    admin_client: TestClient, db_session: Session, mails
+):
+    campaign = _campaign(db_session)
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    _assign(db_session, campaign, klaus, 14)
+    _revoked(admin_client, db_session, klaus)
+
+    admin_client.post(f"/admin/personen/{klaus.id}/erinnern")
+
+    db_session.expire_all()
+    assert db_session.get(Person, klaus.id).revoked_at is None
+    assert len(mails["reminder"]) == 1
+
+
+def test_failed_mails_after_revoke_keep_revoked_at(
+    admin_client: TestClient, db_session: Session, monkeypatch
+):
+    campaign = _campaign(db_session)
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    _assign(db_session, campaign, klaus, 14)
+    _revoked(admin_client, db_session, klaus)
+    revoked_at = db_session.get(Person, klaus.id).revoked_at
+
+    def boom(config, **kwargs):
+        raise OSError("smtp down")
+
+    monkeypatch.setattr("app.admin.people.send_invitation_mail", boom)
+    monkeypatch.setattr("app.admin.people.send_reminder_mail", boom)
+    assert "flash err" in admin_client.post(f"/admin/personen/{klaus.id}/einladen").text
+    assert "flash err" in admin_client.post(f"/admin/personen/{klaus.id}/erinnern").text
+
+    db_session.expire_all()
+    assert db_session.get(Person, klaus.id).revoked_at == revoked_at
+
+
+def test_self_requested_login_link_keeps_revoked_at(
+    admin_client: TestClient, db_session: Session, monkeypatch
+):
+    # Nutzerentscheidung (Job 022): nur eine Admin-Mail hebt den Widerruf auf.
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    _revoked(admin_client, db_session, klaus)
+    revoked_at = db_session.get(Person, klaus.id).revoked_at
+    sent = []
+    monkeypatch.setattr(
+        "app.auth.routes.send_magic_link_mail", lambda config, **kwargs: sent.append(kwargs)
+    )
+
+    assert admin_client.post("/login", data={"email": klaus.email}).status_code == 200
+
+    db_session.expire_all()
+    assert len(sent) == 1
+    assert db_session.get(Person, klaus.id).revoked_at == revoked_at
+
+
 def test_free_submissions_panel(admin_client: TestClient, db_session: Session):
     lena = _person(db_session, "lena@example.test", "Lena")
     assert "/admin/aufnahmen" not in admin_client.get("/admin/personen").text.split("</nav>")[1]

@@ -266,7 +266,8 @@ def test_geschichten_saves_title_and_text(admin_client: TestClient, db_session: 
     db_session.expire_all()
     slot = _slot(db_session, 15)
     assert slot.auftrag.title == "Der Pfefferkuchenmann"
-    assert slot.auftrag.vorlesetext == "Es war einmal"
+    # Advent-Anreicherung U2: die Begruessung steht als eigener Absatz davor.
+    assert slot.auftrag.vorlesetext == "Hallo, hier ist Klaus.\n\nEs war einmal"
 
     html = admin_client.get(f"/admin/geschichten?slot_id={slot.id}").text
     # Mehrkalender U10: die Maske zeigt den Auftrag; die Zeile links den Tag.
@@ -497,3 +498,244 @@ def test_calendar_legend_shows_sample_tiles(admin_client: TestClient, campaign):
     assert 'class="muster fehlt"' in legend
     assert 'class="muster glimmt"' in legend
     assert 'class="siegel"' in legend
+
+
+# --- Advent-Anreicherung U2: Begruessung beim Zuweisen ------------------------
+
+
+def _save(client: TestClient, slot: Slot, person_id, text: str, title: str = ""):
+    return client.post(
+        f"/admin/geschichten/{slot.id}",
+        data={"person_id": str(person_id), "title": title, "vorlesetext": text},
+    )
+
+
+def _auftrag_of(db: Session, slot: Slot):
+    db.expire_all()
+    return db.get(Slot, slot.id).auftrag
+
+
+def test_begruessung_names_calendar_child(admin_client: TestClient, db_session: Session, campaign):
+    campaign.kind_name = " Mila "
+    db_session.commit()
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    slot = _slot(db_session, 3)
+
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+
+    auftrag = _auftrag_of(db_session, slot)
+    assert auftrag.vorlesetext.startswith("Hallo Mila, hier ist Oma Gerda.\n\n")
+    assert auftrag.begruessung_at is not None
+
+
+def test_begruessung_without_child_name(admin_client: TestClient, db_session: Session, campaign):
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    slot = _slot(db_session, 3)
+
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+
+    assert _auftrag_of(db_session, slot).vorlesetext == (
+        "Hallo, hier ist Oma Gerda.\n\nEs war einmal"
+    )
+
+
+def test_begruessung_falls_back_to_instance_child_name(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    from app.settings import get_einstellungen
+
+    campaign.kind_name = "  "
+    get_einstellungen(db_session).kind_name = "Mila"
+    db_session.commit()
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    slot = _slot(db_session, 3)
+
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+
+    assert _auftrag_of(db_session, slot).vorlesetext.startswith(
+        "Hallo Mila, hier ist Oma Gerda.\n\n"
+    )
+
+
+def test_changed_begruessung_survives_reassign_and_save(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    opa = create_person(db_session, "opa@example.test", "Opa")
+    slot = _slot(db_session, 3)
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+    edited = "Hallo ihr Lieben, hier ist eure Oma.\n\nEs war einmal"
+
+    _save(admin_client, slot, opa.id, edited)
+    _save(admin_client, slot, opa.id, edited)
+
+    assert _auftrag_of(db_session, slot).vorlesetext == edited
+
+
+def test_set_begruessung_marker_keeps_text(admin_client: TestClient, db_session: Session, campaign):
+    from app.models import Auftrag
+
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    slot = _slot(db_session, 3)
+    auftrag = create_auftrag(db_session)
+    add_calendar_day(db_session, auftrag.id, slot.id, now=BEFORE_ADVENT, delivery_time=time(20))
+    marker = datetime(2026, 10, 2, 8, 0)
+    db_session.get(Auftrag, auftrag.id).begruessung_at = marker
+    db_session.commit()
+
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+
+    auftrag = _auftrag_of(db_session, slot)
+    assert auftrag.vorlesetext == "Es war einmal"
+    assert auftrag.begruessung_at == marker
+
+
+def test_begruessung_waits_for_text(admin_client: TestClient, db_session: Session, campaign):
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    slot = _slot(db_session, 3)
+
+    _save(admin_client, slot, gerda.id, "")
+    auftrag = _auftrag_of(db_session, slot)
+    assert auftrag.vorlesetext is None
+    assert auftrag.begruessung_at is None
+
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+    auftrag = _auftrag_of(db_session, slot)
+    assert auftrag.vorlesetext == "Hallo, hier ist Oma Gerda.\n\nEs war einmal"
+    marker = auftrag.begruessung_at
+    assert marker is not None
+
+    _save(admin_client, slot, gerda.id, auftrag.vorlesetext)
+    auftrag = _auftrag_of(db_session, slot)
+    assert auftrag.vorlesetext == "Hallo, hier ist Oma Gerda.\n\nEs war einmal"
+    assert auftrag.begruessung_at == marker
+
+
+def test_begruessung_neutral_for_calendars_with_different_children(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    campaign.kind_name = "Mila"
+    berger = _second_calendar(db_session)
+    berger.kind_name = "Emma"
+    db_session.commit()
+    opa = create_person(db_session, "opa@example.test", "Opa")
+    auftrag = create_auftrag(db_session)
+    add_calendar_day(
+        db_session,
+        auftrag.id,
+        _cal_slot(db_session, berger, 7).id,
+        now=BEFORE_ADVENT,
+        delivery_time=time(20),
+    )
+    db_session.commit()
+    slot = _slot(db_session, 3)
+    add_calendar_day(db_session, auftrag.id, slot.id, now=BEFORE_ADVENT, delivery_time=time(20))
+    db_session.commit()
+
+    admin_client.post(
+        f"/admin/auftraege/{auftrag.id}",
+        data={"person_id": str(opa.id), "title": "", "vorlesetext": "Es war einmal"},
+    )
+
+    assert _auftrag_of(db_session, slot).vorlesetext.startswith("Hallo, hier ist Opa.\n\n")
+
+
+def test_draft_gets_begruessung_only_with_calendar_day(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    from app.models import Auftrag
+
+    campaign.kind_name = "Mila"
+    db_session.commit()
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+
+    response = admin_client.post(
+        "/admin/auftraege",
+        data={"person_id": str(gerda.id), "title": "", "vorlesetext": "Es war einmal"},
+        follow_redirects=False,
+    )
+    auftrag_id = int(response.headers["location"].rsplit("=", 1)[1])
+    db_session.expire_all()
+    auftrag = db_session.get(Auftrag, auftrag_id)
+    assert auftrag.vorlesetext == "Es war einmal"
+    assert auftrag.begruessung_at is None
+
+    admin_client.post(
+        f"/admin/auftraege/{auftrag_id}/tage", data={"slot_id": str(_slot(db_session, 3).id)}
+    )
+    db_session.expire_all()
+    auftrag = db_session.get(Auftrag, auftrag_id)
+    assert auftrag.vorlesetext.startswith("Hallo Mila, hier ist")
+    assert auftrag.begruessung_at is not None
+
+
+def test_person_without_display_name_sets_only_marker(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    nameless = create_person(db_session, "ohne-name@example.test", "  ")
+    slot = _slot(db_session, 3)
+
+    _save(admin_client, slot, nameless.id, "Es war einmal")
+
+    auftrag = _auftrag_of(db_session, slot)
+    assert auftrag.vorlesetext == "Es war einmal"
+    assert auftrag.begruessung_at is not None
+
+
+def test_begruessung_normalizes_line_endings(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    slot = _slot(db_session, 3)
+
+    _save(admin_client, slot, gerda.id, "Es war\r\neinmal\rim Wald")
+
+    assert _auftrag_of(db_session, slot).vorlesetext == (
+        "Hallo, hier ist Oma Gerda.\n\nEs war\neinmal\nim Wald"
+    )
+
+
+def test_reassign_warns_about_unchanged_begruessung(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    opa = create_person(db_session, "opa@example.test", "Opa")
+    slot = _slot(db_session, 3)
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+    text = _auftrag_of(db_session, slot).vorlesetext
+
+    html = _save(admin_client, slot, opa.id, text).text
+
+    assert _flash(html) == (
+        "ok: Geschichte gespeichert. Der Vorlesetext beginnt noch mit der Begrüßung von Oma Gerda."
+    )
+
+
+def test_reassign_auftrag_warns_about_unchanged_begruessung(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    opa = create_person(db_session, "opa@example.test", "Opa")
+    slot = _slot(db_session, 3)
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+    auftrag = _auftrag_of(db_session, slot)
+
+    html = admin_client.post(
+        f"/admin/auftraege/{auftrag.id}",
+        data={"person_id": str(opa.id), "title": "", "vorlesetext": auftrag.vorlesetext},
+    ).text
+
+    assert "beginnt noch mit der Begrüßung von Oma Gerda" in _flash(html)
+
+
+def test_reassign_without_warning_after_changed_begruessung(
+    admin_client: TestClient, db_session: Session, campaign
+):
+    gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
+    opa = create_person(db_session, "opa@example.test", "Opa")
+    slot = _slot(db_session, 3)
+    _save(admin_client, slot, gerda.id, "Es war einmal")
+
+    html = _save(admin_client, slot, opa.id, "Hallo, hier ist Opa.\n\nEs war einmal").text
+
+    assert "beginnt noch mit der Begrüßung von" not in _flash(html)

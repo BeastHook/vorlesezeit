@@ -1392,6 +1392,17 @@ hr.div {
 .upload-details:not([open]) > .upload-body {
   display: none;
 }
+/* Am Handy klappt der Upload nach unten in den freien Platz auf, statt die
+   Leiste ueber das Titelfeld wachsen zu lassen (docs/design/upload-titel-mockup.html,
+   Variante A): Hinweis weg, flachere Flaeche. */
+@media (max-width: 899.98px) {
+  .fixed-bottom > section:has(> .upload-details[open]) > .rec-hint {
+    display: none;
+  }
+  .upload-body .drop {
+    padding: var(--space-2) var(--space-3);
+  }
+}
 .scroll-toggle-label {
   position: absolute;
   top: calc(100% + 4px);
@@ -1449,6 +1460,9 @@ hr.div {
 .setup-details > summary { list-style: none; cursor: pointer; display: inline-flex; }
 .setup-details > summary::-webkit-details-marker { display: none; }
 .setup-details[open] > summary { margin-bottom: var(--space-2); }
+/* Kalender-Panel mit drei Teilen (Name, Vorspann, Abspann), je mit eigenen Formularen. */
+.kal-teil { display: flex; flex-direction: column; gap: var(--space-2); }
+.kal-teil + .kal-teil { border-top: 1px solid var(--color-divider); padding-top: var(--space-3); }
 .stack-form { display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; }
 .stack-form .tonie-list { align-self: stretch; }
 .field-state { display: flex; flex-wrap: wrap; gap: 6px var(--space-2); align-items: center; margin-top: 6px; }

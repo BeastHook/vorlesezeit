@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import DateTime, bindparam, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import Config
@@ -83,6 +84,15 @@ _MEHRKALENDER_COLUMNS = [
     ("persons", "reminded_at", "DATETIME"),
     ("einstellungen", "hoechste_person_id", "INTEGER"),
     ("beitraege", "withdrawn_at", "DATETIME"),
+    # Advent-Anreicherung KTD8.
+    ("auftraege", "begruessung_at", "DATETIME"),
+    ("persons", "revoked_at", "DATETIME"),
+    ("campaigns", "kind_name", "VARCHAR"),
+    ("campaigns", "vorspann_key", "VARCHAR"),
+    ("campaigns", "abspann_key", "VARCHAR"),
+    ("campaigns", "vorspann_aus", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("einstellungen", "rahmen_aus", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("einstellungen", "oeffentliche_adresse", "VARCHAR"),
 ]
 
 
@@ -103,12 +113,14 @@ def _migrate_mehrkalender(engine) -> None:
     missing = [(t, c, ddl) for t, c, ddl in _MEHRKALENDER_COLUMNS if c not in existing[t]]
     if not missing:
         return
+    missing_columns = {(t, c) for t, c, _ in missing}
     with engine.begin() as conn:
         conn.exec_driver_sql("BEGIN")
         for table, column, ddl in missing:
             conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-        if ("slots", "auftrag_id") in {(t, c) for t, c, _ in missing}:
+        if ("slots", "auftrag_id") in missing_columns:
             _map_existing_data(conn)
+        _map_advent_data(conn, missing_columns)
 
 
 def _map_existing_data(conn) -> None:
@@ -161,6 +173,25 @@ def _map_existing_data(conn) -> None:
             "WHERE campaigns.id = delivery_runs.campaign_id)"
         )
     )
+
+
+def _map_advent_data(conn, missing_columns: set[tuple[str, str]]) -> None:
+    """Advent-Anreicherung KTD8: Merker fuer Bestandsdaten, nur wenn die Spalte
+    vor dem Start fehlte. Nach `_map_existing_data`, damit aus Slots erzeugte
+    Auftraege mitzaehlen (R3, AE3)."""
+    # Als DateTime gebunden: gleiches Textformat wie die ORM-Spalten, ohne den
+    # veralteten datetime-Adapter des Treibers.
+    now = bindparam("now", datetime.now(UTC).replace(tzinfo=None), type_=DateTime())
+    if ("persons", "revoked_at") in missing_columns:
+        conn.execute(
+            text("UPDATE persons SET revoked_at = :now WHERE access_version > 0").bindparams(now)
+        )
+    if missing_columns & {("auftraege", "begruessung_at"), ("slots", "auftrag_id")}:
+        conn.execute(
+            text(
+                "UPDATE auftraege SET begruessung_at = :now WHERE person_id IS NOT NULL"
+            ).bindparams(now)
+        )
 
 
 def make_session_factory(engine) -> sessionmaker[Session]:

@@ -26,7 +26,7 @@ from app.admin.common import (
 from app.admin.state import SELECTION_KEY, auftrag_lock_slot, is_slot_fixed, selections
 from app.auth.dependencies import get_db, require_admin
 from app.models import Auftrag, Beitrag, Campaign, Person, Slot
-from app.settings import get_einstellungen
+from app.settings import calendar_kind_name, get_einstellungen
 
 SLOT_COUNT = 24
 
@@ -295,6 +295,39 @@ def delete_auftrag(
     session.delete(auftrag)
     session.flush()
     return detached
+
+
+# --- Begruessung beim Zuweisen (Advent-Anreicherung U2, R1-R3, R16-R18) ------
+
+
+def auftrag_kind_name(session: Session, auftrag: Auftrag) -> str:
+    """R16: der Kindername aller Kalender des Auftrags; bei verschiedenen
+    Namen leer, damit die Begruessung nie ein falsches Kind nennt."""
+    names = {calendar_kind_name(session, slot.campaign) for slot in auftrag.slots}
+    return names.pop() if len(names) == 1 else ""
+
+
+def begruessung(kind_name: str, display_name: str) -> str:
+    if kind_name:
+        return f"Hallo {kind_name}, hier ist {display_name}."
+    return f"Hallo, hier ist {display_name}."
+
+
+def insert_begruessung(session: Session, auftrag: Auftrag) -> None:
+    """R1/R2: einmal je Auftrag, sobald Person, Text und Kalendertag da sind;
+    danach gehoert der Absatz dem Admin (KTD10). R3: ohne Anzeigenamen nur
+    der Merker."""
+    if auftrag.begruessung_at is not None or auftrag.person_id is None:
+        return
+    if not auftrag.vorlesetext or not auftrag.slots:
+        return
+    name = _get(session, Person, auftrag.person_id).display_name.strip()
+    if name:
+        text = auftrag.vorlesetext.replace("\r\n", "\n").replace("\r", "\n")
+        greeting = begruessung(auftrag_kind_name(session, auftrag), name)
+        auftrag.vorlesetext = f"{greeting}\n\n{text}"
+    auftrag.begruessung_at = _utcnow()
+    session.flush()
 
 
 def create_person(session: Session, email: str, display_name: str = "") -> Person:

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # R27: der Link einer Ablehnungsmail fuehrt direkt zur Aufnahmeansicht. Nur
 # genau diese Pfade sind als Ziel erlaubt -- kein offener Redirect. KTD14:
 # die Familie adressiert den Auftrag; alte Tuerchen-Adressen gelten nicht mehr.
-_NEXT_PATH = re.compile(r"/record/(auftrag/(\d+)|free)")
+_NEXT_PATH = re.compile(r"/record/(auftrag/(\d+)|free)|/archiv")
 
 
 def _safe_next(next_path: str) -> str:

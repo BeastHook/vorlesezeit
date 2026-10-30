@@ -92,3 +92,16 @@ def update_verfuegbar() -> bool:
     from app import __version__
 
     return _latest is not None and is_newer(_latest, __version__)
+
+
+def neuester_tag() -> str | None:
+    return _latest
+
+
+def versionsstand() -> str:
+    """Stand: neu, aktuell oder unbekannt; loest keine Abfrage aus."""
+    from app import __version__
+
+    if _latest is None or parse_version(__version__) is None:
+        return "unbekannt"
+    return "neu" if is_newer(_latest, __version__) else "aktuell"

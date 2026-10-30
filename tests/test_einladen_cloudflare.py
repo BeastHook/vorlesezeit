@@ -7,7 +7,14 @@ import json
 import httpx
 import pytest
 
-from scripts.einladen.cloudflare import API_BASE_URL, Cloudflare, CloudflareError, DnsEintrag
+from scripts.einladen.cloudflare import (
+    API_BASE_URL,
+    Cloudflare,
+    CloudflareError,
+    DnsEintrag,
+    Mailregel,
+    Zieladresse,
+)
 
 ACCOUNT = "acc123"
 ZONE = "zone456"
@@ -161,3 +168,66 @@ def test_antwort_ohne_json():
     )
     with pytest.raises(CloudflareError, match="502"):
         client(api).tunnel_token(TUNNEL)
+
+
+def test_zieladressen_mit_bestaetigung():
+    api = Api(
+        {
+            ("GET", f"/accounts/{ACCOUNT}/email/routing/addresses"): ok(
+                [
+                    {
+                        "id": "a1",
+                        "email": "anna@example.org",
+                        "verified": "2026-10-30T10:00:00Z",
+                    },
+                    {"id": "a2", "email": "ben@example.org", "verified": None},
+                ]
+            )
+        }
+    )
+    assert client(api).zieladressen() == [
+        Zieladresse("a1", "anna@example.org", True),
+        Zieladresse("a2", "ben@example.org", False),
+    ]
+    assert api.aufrufe[0].url.params["per_page"] == "50"
+
+
+def test_mailregeln_liest_empfaenger_und_ziele():
+    api = Api(
+        {
+            ("GET", f"/zones/{ZONE}/email/routing/rules"): ok(
+                [
+                    {
+                        "id": "m1",
+                        "matchers": [
+                            {"type": "literal", "field": "to", "value": "x@vorlesezeit.app"}
+                        ],
+                        "actions": [{"type": "forward", "value": ["anna@example.org"]}],
+                    },
+                    {"id": "m2", "matchers": [{"type": "all"}], "actions": [{"type": "drop"}]},
+                ]
+            )
+        }
+    )
+    assert client(api).mailregeln() == [
+        Mailregel("m1", "x@vorlesezeit.app", ("anna@example.org",)),
+        Mailregel("m2", None, ()),
+    ]
+    assert api.aufrufe[0].url.params["per_page"] == "50"
+
+
+def test_mailregel_anlegen_leitet_weiter():
+    api = Api({("POST", f"/zones/{ZONE}/email/routing/rules"): ok({"id": "m9"})})
+    assert client(api).mailregel_anlegen("x@vorlesezeit.app", "anna@example.org") == "m9"
+    assert json.loads(api.aufrufe[0].content) == {
+        "name": "x@vorlesezeit.app",
+        "enabled": True,
+        "matchers": [{"type": "literal", "field": "to", "value": "x@vorlesezeit.app"}],
+        "actions": [{"type": "forward", "value": ["anna@example.org"]}],
+    }
+
+
+def test_mailregel_loeschen():
+    api = Api({("DELETE", f"/zones/{ZONE}/email/routing/rules/m9"): ok({"id": "m9"})})
+    client(api).mailregel_loeschen("m9")
+    assert len(api.aufrufe) == 1
