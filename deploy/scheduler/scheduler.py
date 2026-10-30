@@ -1,8 +1,9 @@
 """Zeitplan-Container (U14, KTD14): ruft die Auslösung im Takt auf, sonst nichts.
 
-Alle fünf Minuten zwischen 17:00 und 01:45 Europe/Berlin ein POST auf
-/delivery/trigger im internen Compose-Netz. Ob etwas fällig ist, entscheidet
-die App (U10, KTD13) -- dieses Skript entscheidet nichts. Ist die App gerade
+Alle fünf Minuten zwischen 17:00 und 01:45 sowie zwischen 07:00 und 11:00
+Europe/Berlin ein POST auf /delivery/trigger im internen Compose-Netz. Ob
+etwas fällig ist (Auslieferung am Abend, Morgen-Mails vom 1. bis 25.12.),
+entscheidet die App (U10, KTD13, Advent U7) -- dieses Skript entscheidet nichts. Ist die App gerade
 nicht erreichbar, wird das protokolliert und der nächste Takt abgewartet.
 
 `--once` ruft sofort einmal auf, unabhängig vom Fenster (Rauchtest), und
@@ -23,12 +24,15 @@ from zoneinfo import ZoneInfo
 BERLIN = ZoneInfo("Europe/Berlin")
 WINDOW_START = clock(17, 0)
 WINDOW_END = clock(1, 45)
+MORNING_START = clock(7, 0)
+MORNING_END = clock(11, 0)
 INTERVAL = timedelta(minutes=5)
 TIMEOUT_SECONDS = 30
 
 
 def in_window(now: datetime) -> bool:
-    return now.time() >= WINDOW_START or now.time() <= WINDOW_END
+    t = now.time()
+    return t >= WINDOW_START or t <= WINDOW_END or MORNING_START <= t < MORNING_END
 
 
 def next_tick(now: datetime) -> datetime:
@@ -67,7 +71,7 @@ def main() -> int:
         status = call(url, secret)
         return 0 if status is not None and 200 <= status < 300 else 1
 
-    log("gestartet, Fenster 17:00-01:45 Europe/Berlin, Takt 5 min")
+    log("gestartet, Fenster 17:00-01:45 und 07:00-11:00 Europe/Berlin, Takt 5 min")
     while True:
         tick = next_tick(datetime.now(BERLIN))
         time.sleep(max(0.0, (tick - datetime.now(BERLIN)).total_seconds()))

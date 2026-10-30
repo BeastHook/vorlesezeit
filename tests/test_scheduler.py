@@ -25,7 +25,18 @@ def _at(hour: int, minute: int, second: int = 0) -> datetime:
 
 @pytest.mark.parametrize(
     ("hour", "minute", "expected"),
-    [(16, 55, False), (17, 0, True), (23, 30, True), (1, 45, True), (1, 50, False)],
+    [
+        (16, 55, False),
+        (17, 0, True),
+        (23, 30, True),
+        (1, 45, True),
+        (1, 50, False),
+        (6, 55, False),
+        (7, 0, True),
+        (10, 55, True),
+        (11, 0, False),
+        (12, 0, False),
+    ],
 )
 def test_in_window(hour, minute, expected):
     assert scheduler.in_window(_at(hour, minute)) is expected
