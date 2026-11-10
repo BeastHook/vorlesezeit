@@ -61,9 +61,10 @@ from app.admin.setup import (
 from app.config import Config, load_config
 from app.db import create_db_engine, init_db, make_session_factory
 from app.delivery.chapters import load_app_chapters, stock_loss, stock_of
-from app.delivery.job import run_delivery
+from app.delivery.job import DeliveryOutcome, run_delivery
 from app.mail.report import mask_tonie_id
-from app.models import Beitrag, Campaign, CreativeTonie, Person
+from app.models import Beitrag, Campaign, CreativeTonie, Person, Slot
+from app.recording.normalize import normalize_recording
 from app.storage import ObjectStorage
 from app.toniecloud.client import (
     KontoUnavailable,
@@ -81,6 +82,7 @@ SLOT_COUNT = 24
 # Approach-Schritt 4: bewusst eingestreute Fehlerfaelle.
 MISSING_DAY = 5  # kein Beitrag -> Ersatzbeitrag-Pfad ueber den fehlenden Tag.
 WRONG_FORMAT_DAY = 8  # zulaessiges Format, von der Verarbeitung verworfener Inhalt.
+NACHHOL_DAY = 5  # Job 040: Tag N verpasst, N+1 holt nach, N+2 raeumt ab.
 # Approach-Schritt 4 (doppelter Lauf) und Schritt 5 (Kontrolllauf-Reparatur).
 DUPLICATE_DAY = 1
 KONTROLLLAUF_DAY = 3
@@ -213,12 +215,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
 # --- fill ------------------------------------------------------------------
 
 
-def fill(
-    db: Session, storage: ObjectStorage, tonie: CreativeTonie, *, now: datetime
-) -> tuple[int, int]:
-    """Platzhalterbeitraege ueber Auftraege am Kalender des Tonies (Mehrkalender
-    KTD1). `now` zeitzonenbewusst (Europe/Berlin). Liefert (Anzahl
-    Tagesbeitraege, ID des Ersatzbeitrags)."""
+def _empty_calendar(db: Session, tonie: CreativeTonie) -> tuple[Campaign, dict[int, Slot]]:
     campaign = calendar_of(db, tonie)
     slots = {slot.day: slot for slot in campaign.slots}
     if any(slot.auftrag_id is not None for slot in slots.values()):
@@ -226,10 +223,26 @@ def fill(
             f"Kalender {campaign.name!r} hat bereits belegte Tuerchen -- die Generalprobe "
             "nur auf einem eigenen, leeren Kalender fahren."
         )
+    return campaign, slots
+
+
+def _tone(frequency: int = 440) -> bytes:
+    """Probe-Ton wie eine echte Einreichung normalisiert: rohe Toene lassen
+    libmp3lame beim Rahmen abbrechen (Generalprobe 2026-11-10)."""
+    return normalize_recording(make_tone_mp3(frequency=frequency))
+
+
+def fill(
+    db: Session, storage: ObjectStorage, tonie: CreativeTonie, *, now: datetime
+) -> tuple[int, int]:
+    """Platzhalterbeitraege ueber Auftraege am Kalender des Tonies (Mehrkalender
+    KTD1). `now` zeitzonenbewusst (Europe/Berlin). Liefert (Anzahl
+    Tagesbeitraege, ID des Ersatzbeitrags)."""
+    campaign, slots = _empty_calendar(db, tonie)
     person = _rehearsal_person(db)
     delivery_time = settings.delivery_time_for(db, now.date())
 
-    tone = make_tone_mp3()
+    tone = _tone()
     wrong_format = make_wrong_format_mp3()
     approved_at = now.astimezone(UTC).replace(tzinfo=None)
     prefix = f"rehearsal/kalender-{campaign.id}"
@@ -255,6 +268,18 @@ def fill(
         db.rollback()
         raise SystemExit(f"Abbruch, nichts angelegt: {exc}") from exc
 
+    return created, _add_replacement(db, storage, campaign, person, tone, approved_at, prefix)
+
+
+def _add_replacement(
+    db: Session,
+    storage: ObjectStorage,
+    campaign: Campaign,
+    person: Person,
+    tone: bytes,
+    approved_at: datetime,
+    prefix: str,
+) -> int:
     replacement_key = f"{prefix}/replacement.mp3"
     storage.put(replacement_key, tone, content_type="audio/mpeg")
     replacement = Beitrag(
@@ -269,7 +294,7 @@ def fill(
     db.refresh(replacement)
 
     set_replacement_beitrag(db, replacement.id, campaign.id)
-    return created, replacement.id
+    return replacement.id
 
 
 def cmd_fill(args: argparse.Namespace) -> None:
@@ -431,6 +456,161 @@ def cmd_run(args: argparse.Namespace) -> None:
     print("Generalprobe abgeschlossen, keine unerklaerten Fehlschlaege.")
 
 
+# --- nachholen (Job 040) ----------------------------------------------------
+
+
+def fill_nachholen(
+    db: Session, storage: ObjectStorage, tonie: CreativeTonie, *, now: datetime
+) -> int:
+    """Tage NACHHOL_DAY bis NACHHOL_DAY+2 auf einem leeren Kalender; die
+    Geschichte des ersten Tages noch nicht freigegeben. Liefert ihre ID."""
+    campaign, slots = _empty_calendar(db, tonie)
+    person = _rehearsal_person(db)
+    delivery_time = settings.delivery_time_for(db, now.date())
+    approved_at = now.astimezone(UTC).replace(tzinfo=None)
+    prefix = f"rehearsal/kalender-{campaign.id}/nachholen"
+
+    missed_id = 0
+    try:
+        for offset, freq in enumerate((440, 495, 523)):
+            day = NACHHOL_DAY + offset
+            key = f"{prefix}/day-{day}.mp3"
+            storage.put(key, _tone(freq), content_type="audio/mpeg")
+            auftrag = create_auftrag(db, person_id=person.id, title=f"Generalprobe Tag {day}")
+            add_calendar_day(db, auftrag.id, slots[day].id, now=now, delivery_time=delivery_time)
+            beitrag = attach_beitrag(db, auftrag, person_id=person.id, audio_object_key=key)
+            beitrag.title = f"Generalprobe Tag {day}"
+            beitrag.chapter_title = f"Tag {day}"
+            if offset == 0:
+                db.flush()
+                missed_id = beitrag.id
+            else:
+                beitrag.approved_at = approved_at
+    except AuftragError as exc:
+        db.rollback()
+        raise SystemExit(f"Abbruch, nichts angelegt: {exc}") from exc
+
+    _add_replacement(db, storage, campaign, person, _tone(), approved_at, prefix)
+    return missed_id
+
+
+def _approve_missed(db: Session, beitrag: Beitrag) -> None:
+    beitrag.approved_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
+
+
+def nachholen_sequence(
+    db: Session,
+    client: TonieCloudClient,
+    storage: ObjectStorage,
+    tonie: CreativeTonie,
+    protocol: Protocol,
+) -> None:
+    """Tag N mit Ersatzbeitrag, Freigabe danach, Tag N+1 holt nach, Tag N+2
+    raeumt ab. Jeder Schritt landet im Protokoll; kein Abbruch."""
+    day = NACHHOL_DAY
+    tonie_id = tonie.tonie_id
+    household_id = client.find_household_id(tonie_id)
+    stock = stock_of(
+        client.get_state(household_id, tonie_id), load_app_chapters(tonie.app_chapters)
+    )
+    stock_titles = [c.title for c in stock]
+    slot = next(s for s in calendar_of(db, tonie).slots if s.day == day)
+    missed = db.scalars(select(Beitrag).where(Beitrag.auftrag_id == slot.auftrag_id)).first()
+
+    def run(target: int) -> tuple[DeliveryOutcome, list[str], str | None, float]:
+        start = time.monotonic()
+        outcome = run_delivery(db, client, storage, tonie, run_type="vorabend", target_day=target)
+        live = client.get_state(household_id, tonie_id)
+        titles = [c.title for c in live.chapters]
+        new_count = len(titles) - len(stock)
+        loss = stock_loss(stock, live, new_count=new_count) if new_count > 0 else "kein App-Kapitel"
+        return outcome, titles, loss, time.monotonic() - start
+
+    outcome, titles, loss, seconds = run(day)
+    protocol.record(
+        f"tag-{day}-ersatz",
+        outcome.success and outcome.used_replacement and loss is None,
+        f"ersatzbeitrag={outcome.used_replacement} grund={outcome.reason} live_titel={titles}",
+        seconds,
+    )
+
+    _approve_missed(db, missed)
+    protocol.record(f"tag-{day}-freigabe", True, f"Beitrag {missed.id} nach dem Lauf freigegeben")
+
+    outcome, titles, loss, seconds = run(day + 1)
+    expected = [f"Tag {day + 1}", f"Tag {day}", *stock_titles]
+    protocol.record(
+        f"tag-{day + 1}-nachgeholt",
+        outcome.success and titles == expected and loss is None,
+        f"erwartet={expected} live_titel={titles} grund={outcome.reason} {loss or ''}".strip(),
+        seconds,
+    )
+
+    outcome, titles, loss, seconds = run(day + 2)
+    expected = [f"Tag {day + 2}", *stock_titles]
+    protocol.record(
+        f"tag-{day + 2}-abgeraeumt",
+        outcome.success and titles == expected and loss is None,
+        f"erwartet={expected} live_titel={titles} grund={outcome.reason} {loss or ''}".strip(),
+        seconds,
+    )
+
+
+def cmd_fill_nachholen(args: argparse.Namespace) -> None:
+    config, db, storage, _ = _wiring()
+    tonie = select_tonie(db, args.tonie_index)
+    missed_id = fill_nachholen(db, storage, tonie, now=datetime.now(ZoneInfo(config.timezone)))
+    print(
+        f"Tage {NACHHOL_DAY} bis {NACHHOL_DAY + 2} angelegt, Tag {NACHHOL_DAY} "
+        f"(Beitrag {missed_id}) noch nicht freigegeben; Ersatzbeitrag verknuepft."
+    )
+
+
+def cmd_nachholen(args: argparse.Namespace) -> None:
+    _, db, storage, factory = _wiring()
+    tonie = select_tonie(db, args.tonie_index)
+    calendar_of(db, tonie)
+    client = tonie_client(factory, db, tonie)
+    print(
+        "Hinweis: ausserhalb des Zeitplanfensters 17:00-01:45 fahren oder den "
+        "Zeitplan-Container stoppen (eigener Prozess, keine gemeinsame Sperre je Tonie)."
+    )
+    household_id = client.find_household_id(tonie.tonie_id)
+    baseline_state = client.get_state(household_id, tonie.tonie_id)
+    baseline_path = _save_baseline(baseline_state.chapters)
+    print(f"Baseline gesichert ({len(baseline_state.chapters)} Kapitel) -> {baseline_path}")
+
+    protocol = Protocol()
+    try:
+        nachholen_sequence(db, client, storage, tonie, protocol)
+    except Exception as exc:
+        protocol.record("abbruch", False, repr(exc))
+    finally:
+        start = time.monotonic()
+        try:
+            detail = _restore(client, household_id, tonie.tonie_id, list(baseline_state.chapters))
+            restored_ok = detail.startswith("wiederhergestellt")
+        except Exception as exc:
+            detail = (
+                f"RESTORE FEHLGESCHLAGEN: {exc!r} -- Baseline liegt in {baseline_path}, "
+                f"manuell erneut versuchen mit: restore-baseline --from {baseline_path}"
+            )
+            restored_ok = False
+        protocol.record("restore-baseline", restored_ok, detail, time.monotonic() - start)
+        log_path = LOG_DIR / f"nachholen-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.md"
+        protocol.write(log_path)
+        print(f"Protokoll geschrieben: {log_path}")
+
+    failures = protocol.unexplained_failures()
+    if failures:
+        print(f"{len(failures)} Fehlschlaege:", file=sys.stderr)
+        for f in failures:
+            print(f"  - {f.name}: {f.detail}", file=sys.stderr)
+        sys.exit(1)
+    print("Nachhol-Probe abgeschlossen, alle Schritte gruen.")
+
+
 # --- restore-baseline ------------------------------------------------------
 
 
@@ -460,6 +640,8 @@ def main(argv: list[str] | None = None) -> None:
         ("setup", cmd_setup),
         ("fill", cmd_fill),
         ("run", cmd_run),
+        ("fill-nachholen", cmd_fill_nachholen),
+        ("nachholen", cmd_nachholen),
         ("restore-baseline", cmd_restore_baseline),
     ):
         command = sub.add_parser(name)

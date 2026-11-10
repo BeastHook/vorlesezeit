@@ -127,9 +127,9 @@ def test_page_shows_panels_and_r45_limit(admin_client, campaign):
 
     assert response.status_code == 200
     text = response.text
-    assert "täglich 20:00 (aus den Einstellungen, R46)" in text
+    assert "täglich 20:00 (aus den Einstellungen)" in text
     assert "nicht die Verarbeitung auf dem Tonie" in text
-    assert "Ersatzbeitrag (R21)" in text
+    assert "Ersatzbeitrag · " in text
     assert "keiner hinterlegt" in text
     # Mehrkalender U10: die Verknuepfung lebt im Setup; der Tonie erscheint
     # ohne Namen nur maskiert (Umschalter und Geltungsbereich).
@@ -137,7 +137,7 @@ def test_page_shows_panels_and_r45_limit(admin_client, campaign):
     assert 'action="/admin/campaign/creative-tonie"' not in text
     assert "••••" + TONIE_ID[-4:] in text
     assert TONIE_ID not in text
-    assert "Manueller Lauf mit mehreren Beiträgen (R20, R42)" in text
+    assert "Manueller Lauf mit mehreren Beiträgen" in text
     assert "Verlauf" in text
 
 
@@ -207,7 +207,7 @@ def test_page_texts_describe_stock_behind_app_chapter(admin_client, campaign, mo
 
 
 def _space_panel(text: str) -> str:
-    start = text.index("Platz auf dem Tonie (R50)")
+    start = text.index("Platz auf dem Tonie")
     return text[start : text.index("Platz prüfen", start)]
 
 

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app import settings
 from app.auth.tokens import ExpiredMagicLinkToken, create_magic_link_token, verify_magic_link_token
 from app.config import Config
-from app.models import Person
+from app.models import Auftrag, Campaign, Person, Slot
 
 NOW = datetime(2026, 10, 2, 12, tzinfo=ZoneInfo("Europe/Berlin"))
 
@@ -332,16 +332,43 @@ def test_confirm_get_greets_person_by_name_without_logging_in(
 
 
 def test_confirm_get_names_child(client: TestClient, config: Config, db_session: Session):
-    from datetime import datetime
-
-    from app import settings
-
-    settings.set_value(db_session, "kind_name", "Emma", now=datetime(2026, 10, 4))
+    db_session.add(Campaign(name="Familie", kind_name="Emma"))
+    db_session.commit()
     token = create_magic_link_token(config, _create_person(db_session))
 
     response = client.get(f"/login/confirm?token={token}")
 
     assert "Du bist beim Adventskalender für Emma dabei." in response.text
+
+
+def test_confirm_get_names_child_of_own_calendar(
+    client: TestClient, config: Config, db_session: Session
+):
+    emma = Campaign(name="Familie", kind_name="Emma")
+    paul = Campaign(name="Patenkind", kind_name="Paul")
+    person = _create_person(db_session)
+    auftrag = Auftrag(person_id=person.id, title="Sterne zählen")
+    db_session.add_all([emma, paul, auftrag])
+    db_session.flush()
+    db_session.add(Slot(campaign_id=paul.id, day=3, auftrag=auftrag))
+    db_session.commit()
+    token = create_magic_link_token(config, person)
+
+    response = client.get(f"/login/confirm?token={token}")
+
+    assert "Du bist beim Adventskalender für Paul dabei." in response.text
+
+
+def test_confirm_get_ignores_instance_child_name(
+    client: TestClient, config: Config, db_session: Session
+):
+    settings.get_einstellungen(db_session).kind_name = "Alt"
+    db_session.commit()
+    token = create_magic_link_token(config, _create_person(db_session))
+
+    response = client.get(f"/login/confirm?token={token}")
+
+    assert "Du bist beim Adventskalender der Familie dabei." in response.text
 
 
 def test_confirm_get_without_child_keeps_family_wording(

@@ -10,15 +10,11 @@ from __future__ import annotations
 
 import logging
 import math
-import re
-import tempfile
 import uuid
-import zipfile
-from collections import Counter
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -33,12 +29,14 @@ from app.admin.common import (
     redirect,
     render,
 )
+from app.admin.people import _date
 from app.admin.setup import (
     AuftragError,
     AuftragLockedError,
     add_calendar_day,
     attach_beitrag,
     create_auftrag,
+    detach_other_beitraege,
     reject_beitrag,
     withdraw_approval,
 )
@@ -54,12 +52,14 @@ from app.admin.state import (
 )
 from app.auth.dependencies import authorize_audio_access, get_db, require_admin
 from app.delivery.job import chapter_title_for, named_title
+from app.mail.antwort import send_antwort_mail
 from app.mail.rejection import send_rejection_mail
-from app.models import Auftrag, Beitrag, Campaign, CreativeTonie, Person, Slot
+from app.models import Antwort, Auftrag, Beitrag, Campaign, CreativeTonie, Person, Slot
 from app.recording.normalize import EmptyRecordingError, normalize_recording
 from app.recording.routing import sanitize_title
 from app.recording.views import MAX_UPLOAD_BYTES
-from app.storage import ObjectMissing, audio_response, commit_or_discard
+from app.storage import audio_response, commit_or_discard, delete_quietly
+from app.zip_download import clean_name_part, zip_response
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +171,13 @@ def _row(db: Session, beitrag: Beitrag, *, now, delivery_time) -> dict:
         "tag_label": "ausgeliefert" if key == "ausgeliefert" else state.label,
         "tag_class": _TAG_CLASSES[key],
         "state_key": state.key,
+        "two_active": beitrag.auftrag is not None
+        and sum(
+            1
+            for b in beitrag.auftrag.beitraege
+            if b.audio_object_key is not None and b.rejected_at is None
+        )
+        >= 2,
     }
 
 
@@ -257,19 +264,44 @@ def aufnahmen(
             "slot": s,
             "label": f"{s.campaign.name} · Tag {s.day} · "
             + (
-                (s.auftrag.person.display_name or s.auftrag.person.email) + " (offen)"
+                (s.auftrag.person.display_name or s.auftrag.person.email)
+                + (" (wird abgelöst)" if active_beitrag(s) is not None else " (offen)")
                 if s.auftrag is not None and s.auftrag.person is not None
                 else "nicht zugewiesen"
             ),
         }
         for s in slots
-        if active_beitrag(s) is None
+        if s.auftrag is None or not any(b.approved_at is not None for b in s.auftrag.beitraege)
+    ]
+
+    vorlesende = (
+        db.execute(
+            select(Person)
+            .where(
+                Person.is_admin.is_(False),
+                Person.revoked_at.is_(None),
+                select(Auftrag.id).where(Auftrag.person_id == Person.id).exists(),
+            )
+            .order_by(Person.id)
+        )
+        .scalars()
+        .all()
+    )
+    antworten = [
+        {"antwort": a, "name": p.display_name or p.email, "date": _date(a.uploaded_at)}
+        for a, p in db.execute(
+            select(Antwort, Person)
+            .join(Person, Antwort.person_id == Person.id)
+            .order_by(Antwort.id)
+        )
     ]
 
     return render(
         request,
         "admin/aufnahmen.html",
         {
+            "vorlesende": [{"id": p.id, "name": p.display_name or p.email} for p in vorlesende],
+            "antworten": antworten,
             "day_rows": day_rows,
             "free_rows": free_rows,
             "detached_beitraege": detached_beitraege,
@@ -296,10 +328,6 @@ def aufnahme_audio(
     return audio_response(request.app.state.storage, key, request.headers.get("range"))
 
 
-# Pfadtrenner und was Windows in Dateinamen nicht erlaubt.
-_UNSAFE_IN_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
-
-
 def _download_name(beitrag: Beitrag, *, several_calendars: bool) -> str:
     """Tag, Titel und zugewiesene Person; freie und geloeste ohne Tag."""
     person = beitrag.person
@@ -315,7 +343,7 @@ def _download_name(beitrag: Beitrag, *, several_calendars: bool) -> str:
             if several_calendars:
                 where = f"{slot.campaign.name} {where}"
     parts = [where, named_title(beitrag) or "ohne Titel", person.display_name or person.email]
-    return " - ".join(" ".join(_UNSAFE_IN_NAME.sub(" ", p).split()) for p in parts)
+    return " - ".join(clean_name_part(p) for p in parts)
 
 
 def _download_order(beitrag: Beitrag) -> tuple[int, int, int]:
@@ -343,38 +371,10 @@ def download(
         return _not_found()
 
     several = len(calendars(db)) > 1
-    names = [_download_name(b, several_calendars=several) for b in beitraege]
-    duplicates = {n for n, count in Counter(names).items() if count > 1}
-    storage = request.app.state.storage
-
-    spool = tempfile.SpooledTemporaryFile(max_size=10 * 1024 * 1024)
-    missing = []
-    with zipfile.ZipFile(spool, "w", zipfile.ZIP_STORED) as archive:
-        for beitrag, name in zip(beitraege, names, strict=True):
-            if name in duplicates:
-                name = f"{name} - {beitrag.id}"
-            try:
-                data = storage.read(beitrag.audio_object_key).data
-            except ObjectMissing:
-                logger.warning("Download: Datei fehlt im Speicher (Beitrag %s)", beitrag.id)
-                missing.append(f"{name}.mp3")
-                continue
-            archive.writestr(f"{name}.mp3", data)
-        if missing:
-            text = "Diese Aufnahmen fehlen im Speicher:\n" + "\n".join(missing) + "\n"
-            archive.writestr("FEHLT.txt", text)
-    spool.seek(0)
-
-    def chunks():
-        with spool:
-            while block := spool.read(1024 * 1024):
-                yield block
-
+    entries = [(_download_name(b, several_calendars=several), b) for b in beitraege]
     filename = f"Vorlesezeit-Aufnahmen-{berlin_now(request).date().isoformat()}.zip"
-    return StreamingResponse(
-        chunks(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    return zip_response(
+        request.app.state.storage, entries, filename, "Diese Aufnahmen fehlen im Speicher:"
     )
 
 
@@ -419,8 +419,9 @@ def upload(
             except AuftragError as exc:
                 flash(request, str(exc), "err")
                 return redirect("/admin/aufnahmen")
-    if auftrag_active_beitrag(auftrag) is not None:
-        flash(request, f"{where[:1].upper()}{where[1:]} hat schon eine Aufnahme.", "err")
+    if any(b.approved_at is not None for b in auftrag.beitraege):
+        subject = "Der Auftrag" if where == "den Auftrag" else where
+        flash(request, f"{subject} hat schon eine freigegebene Aufnahme.", "err")
         return redirect("/admin/aufnahmen")
 
     raw = file.file.read()
@@ -445,10 +446,128 @@ def upload(
         flash(request, "Die Datei lässt sich gerade nicht speichern.", "err")
         return redirect("/admin/aufnahmen")
 
+    detach_other_beitraege(db, auftrag)
     beitrag = attach_beitrag(db, auftrag, person_id=admin.id, audio_object_key=key)
     commit_or_discard(db, request.app.state.storage, key)
     flash(request, f"Datei an {where} gelegt. Bitte noch freigeben.")
     return _back(beitrag.id)
+
+
+def _antwort_error(message: str, status: int = 422) -> JSONResponse:
+    return JSONResponse({"error": message}, status_code=status)
+
+
+@router.post("/aufnahmen/antwort")
+def antwort_speichern(
+    request: Request,
+    person_id: int | None = Form(None),
+    audio: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _admin: Person = Depends(require_admin),
+):
+    """Antwort vom Kind: normalisiert wie ein Admin-Upload, aber nie ein
+    Beitrag. recorder.js erwartet JSON (`next_url` oder `error`)."""
+    person = db.get(Person, person_id) if person_id is not None else None
+    reads_aloud = (
+        person is not None
+        and not person.is_admin
+        and db.execute(select(Auftrag.id).where(Auftrag.person_id == person.id)).first() is not None
+    )
+    if not reads_aloud:
+        return _antwort_error("Diese Person liest nicht vor.")
+    name = person.display_name or person.email
+    if person.revoked_at is not None:
+        return _antwort_error(f"Der Zugang von {name} ist widerrufen. Keine Antwort gespeichert.")
+
+    raw = audio.file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        return _antwort_error("Die Datei ist zu groß.", 413)
+    if not raw:
+        return _antwort_error("Die Datei ist leer.")
+    try:
+        normalized = normalize_recording(raw)
+    except Exception:
+        logger.exception("Antwort nicht lesbar: person=%s", person.id)
+        return _antwort_error("Die Datei lässt sich nicht als Audio lesen.")
+
+    storage = request.app.state.storage
+    key = f"antworten/{person.id}/{uuid.uuid4().hex}.mp3"
+    try:
+        storage.put(key, normalized, content_type="audio/mpeg")
+    except Exception:
+        logger.exception("Antwort nicht gespeichert: person=%s", person.id)
+        return _antwort_error("Die Datei lässt sich gerade nicht speichern.")
+
+    antwort = db.execute(select(Antwort).where(Antwort.person_id == person.id)).scalar_one_or_none()
+    old_key = antwort.audio_object_key if antwort is not None else None
+    if antwort is None:
+        db.add(Antwort(person_id=person.id, audio_object_key=key, uploaded_at=_utcnow()))
+    else:
+        antwort.audio_object_key = key
+        antwort.uploaded_at = _utcnow()
+    commit_or_discard(db, storage, key)
+    if old_key is not None:
+        delete_quietly(storage, old_key)
+
+    try:
+        send_antwort_mail(
+            request.app.state.config,
+            session=db,
+            to_address=person.email,
+            display_name=person.display_name,
+            login_url=login_url(request, person, next_path="/archiv"),
+            person_id=person.id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Antwort-Mail fehlgeschlagen: person=%s fehler=%s", person.id, type(exc).__name__
+        )
+        flash(
+            request,
+            f"Antwort für {name} gespeichert, aber die Mail ließ sich nicht verschicken.",
+            "err",
+        )
+    else:
+        flash(request, f"Antwort für {name} gespeichert, Mail verschickt.")
+    return JSONResponse({"ok": True, "next_url": "/admin/aufnahmen"})
+
+
+@router.get("/aufnahmen/antwort/{antwort_id}/audio")
+def antwort_audio(
+    antwort_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: Person = Depends(require_admin),
+):
+    antwort = db.get(Antwort, antwort_id)
+    if antwort is None:
+        return _not_found()
+    return audio_response(
+        request.app.state.storage, antwort.audio_object_key, request.headers.get("range")
+    )
+
+
+@router.post("/aufnahmen/antwort/{antwort_id}/loeschen")
+def antwort_loeschen(
+    antwort_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin: Person = Depends(require_admin),
+):
+    antwort = db.get(Antwort, antwort_id)
+    if antwort is None:
+        return _not_found()
+    # Erst die Datei: scheitert das, bleibt der Verweis darauf erhalten.
+    try:
+        request.app.state.storage.delete(antwort.audio_object_key)
+    except Exception:
+        logger.exception("Loeschen der Antwort-Datei fehlgeschlagen: antwort=%s", antwort.id)
+        flash(request, "Die Datei ließ sich gerade nicht löschen. Bitte erneut versuchen.", "err")
+        return redirect("/admin/aufnahmen")
+    db.delete(antwort)
+    db.commit()
+    flash(request, "Antwort gelöscht.")
+    return redirect("/admin/aufnahmen")
 
 
 @router.post("/aufnahmen/{beitrag_id}/freigeben")

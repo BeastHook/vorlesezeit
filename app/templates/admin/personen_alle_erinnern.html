@@ -1,0 +1,19 @@
+{% extends "admin/_base.html" %}
+{% block title %}Alle erinnern{% endblock %}
+{% block content %}
+<div class="panel warm panel-narrow">
+  <div class="panel-kicker">Alle erinnern?</div>
+  {% if names %}
+  <p>Diese {{ names | length }} {{ "Person bekommt" if names | length == 1 else "Personen bekommen" }} eine Erinnerung:</p>
+  <ul>{% for name in names %}<li>{{ name }}</li>{% endfor %}</ul>
+  <p class="meta">Wer den Zugang widerrufen bekommen hat, ist nicht dabei. Die Erinnerung enthält einen frischen Anmeldelink.</p>
+  <form method="post" action="/admin/personen/alle-erinnern" class="btn-row-left">
+    <button type="submit" class="btn btn-primary btn-inline" data-busy="Wird verschickt …" data-done="Verschickt ✓">Erinnerungen verschicken</button>
+    <a class="btn btn-ghost btn-inline" href="/admin/personen">Abbrechen</a>
+  </form>
+  {% else %}
+  <p>Niemand hat offene Türchen.</p>
+  <div class="btn-row-left"><a class="btn btn-ghost btn-inline" href="/admin/personen">Zurück</a></div>
+  {% endif %}
+</div>
+{% endblock %}

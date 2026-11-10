@@ -1,0 +1,10 @@
+{% extends "mail/_base.html" %}{% from "mail/_base.html" import knopf %}
+{% block body %}
+<p style="margin:0 0 12px">{{ greeting }}</p>
+<p style="margin:0 0 12px">{% if kind %}{{ kind }} hat dir auf deine Geschichte geantwortet.{% else %}Es gibt eine Antwort auf deine Geschichte.{% endif %} Du findest die Antwort im Archiv unter „Antwort für dich“.</p>
+<p style="margin:0 0 4px">Über diesen Link kommst du direkt ins Archiv:</p>
+{{ knopf(login_url, "Zum Archiv") }}
+<p style="margin:0 0 12px">Viel Freude beim Anhören!</p>
+<p style="margin:16px 0 0;white-space:pre-line">{{ gruss }}</p>
+<p style="margin:18px 0 0;font-size:12px;color:#6b5b48;word-break:break-all">Falls der Knopf nicht geht: {{ login_url }}</p>
+{% endblock %}

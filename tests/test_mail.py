@@ -31,6 +31,7 @@ from app.mail.magic_link import send_invitation_mail, send_magic_link_mail
 from app.mail.rejection import send_rejection_mail
 from app.mail.reminder import send_reminder_mail
 from app.mail.smtp import SmtpNichtEingerichtet, check_smtp, probe_login, send_message
+from app.models import Auftrag, Campaign, Person, Slot
 from tests.conftest import REQUIRED_ENV
 from tests.mailutil import html_text, plain_text
 
@@ -89,6 +90,21 @@ def seeded(db_session: Session, config: Config) -> Session:
     """SMTP-Zugang wie nach dem Start: aus der Umgebung uebernommen."""
     settings.seed_from_env(db_session, config, now=NOW)
     return db_session
+
+
+def _reader(db: Session, kind: str | None = None) -> int:
+    """Eine Person; mit `kind` hat sie eine Geschichte in einem Kalender mit diesem Kindernamen."""
+    person = Person(email=f"leser{db.query(Person).count()}@example.test", display_name="Klaus")
+    db.add(person)
+    db.commit()
+    if kind is not None:
+        campaign = Campaign(name=f"Kalender {kind}", kind_name=kind)
+        auftrag = Auftrag(person_id=person.id, title="Sterne zählen")
+        db.add_all([campaign, auftrag])
+        db.flush()
+        db.add(Slot(campaign_id=campaign.id, day=3, auftrag=auftrag))
+        db.commit()
+    return person.id
 
 
 def _message() -> EmailMessage:
@@ -219,6 +235,7 @@ def test_reminder_and_rejection_name_display_name_not_admin(seeded, config, fake
     send_reminder_mail(
         config,
         session=seeded,
+        person_id=_reader(seeded),
         to_address="klaus@example.test",
         display_name="Klaus",
         open_days=[3],
@@ -245,6 +262,7 @@ def test_without_display_name_mails_stay_neutral(seeded, config, fake_smtp):
     send_reminder_mail(
         config,
         session=seeded,
+        person_id=_reader(seeded),
         to_address="klaus@example.test",
         display_name="Klaus",
         open_days=[3],
@@ -461,13 +479,16 @@ def test_reminder_html_continues_greeting_in_lowercase():
 
 
 def test_invitation_mail_names_children_in_number_neutral_sentences(seeded, config, fake_smtp):
-    settings.set_value(seeded, "kind_name", "Emma & Lukas", now=NOW)
     settings.set_value(seeded, "admin_display_name", "Luca", now=NOW)
     settings.set_value(seeded, "magic_link_valid_until", date(2026, 12, 31), now=NOW)
     settings.set_value(seeded, "recording_deadline", date(2026, 11, 24), now=NOW)
 
     send_invitation_mail(
-        config, session=seeded, to_address="k@example.test", login_url="https://x/l?token=t"
+        config,
+        session=seeded,
+        person_id=_reader(seeded, "Emma & Lukas"),
+        to_address="k@example.test",
+        login_url="https://x/l?token=t",
     )
 
     message = fake_smtp.instances[0].sent[0]
@@ -489,7 +510,11 @@ def test_invitation_mail_names_children_in_number_neutral_sentences(seeded, conf
 
 def test_invitation_mail_without_child_name_falls_back_to_family(seeded, config, fake_smtp):
     send_invitation_mail(
-        config, session=seeded, to_address="k@example.test", login_url="https://x/l"
+        config,
+        session=seeded,
+        person_id=_reader(seeded),
+        to_address="k@example.test",
+        login_url="https://x/l",
     )
 
     message = fake_smtp.instances[0].sent[0]
@@ -503,7 +528,7 @@ def test_invitation_mail_without_child_name_falls_back_to_family(seeded, config,
 
 
 def test_login_mail_stays_short_with_child_name(seeded, config, fake_smtp):
-    settings.set_value(seeded, "kind_name", "Emma", now=NOW)
+    _reader(seeded, "Emma")
     send_magic_link_mail(
         config, session=seeded, to_address="k@example.test", login_url="https://x/l"
     )
@@ -514,10 +539,10 @@ def test_login_mail_stays_short_with_child_name(seeded, config, fake_smtp):
 
 
 def test_reminder_thanks_for_reading_to_child(seeded, config, fake_smtp):
-    settings.set_value(seeded, "kind_name", "Emma", now=NOW)
     send_reminder_mail(
         config,
         session=seeded,
+        person_id=_reader(seeded, "Emma"),
         to_address="k@example.test",
         display_name="Klaus",
         open_days=[3],
@@ -541,6 +566,7 @@ def test_family_mail_replies_go_to_admin_and_admin_mail_has_no_reply_to(seeded, 
     send_reminder_mail(
         config,
         session=seeded,
+        person_id=_reader(seeded),
         to_address="klaus@example.test",
         display_name="Klaus",
         open_days=[3],
@@ -564,3 +590,57 @@ def test_family_mail_replies_go_to_admin_and_admin_mail_has_no_reply_to(seeded, 
     assert meldung["To"] == "admin@example.test"
     assert meldung["Reply-To"] is None
     assert eigener_link["Reply-To"] is None
+
+
+# --- Kindername je Kalender (Factory-Job 032) ------------------------------
+
+
+def test_invitation_ignores_instance_child_name(seeded, config, fake_smtp):
+    settings.get_einstellungen(seeded).kind_name = "Alt"
+    seeded.commit()
+
+    send_invitation_mail(
+        config,
+        session=seeded,
+        person_id=_reader(seeded),
+        to_address="k@example.test",
+        login_url="https://x/l",
+    )
+
+    message = fake_smtp.instances[0].sent[0]
+    assert message["Subject"] == "Ein Adventskalender für die Familie, und du liest vor"
+    assert "Alt" not in plain_text(message)
+
+
+def test_invitation_names_only_calendars_of_the_person(seeded, config, fake_smtp):
+    _reader(seeded, "Emma")
+    paul_reader = _reader(seeded, "Paul")
+
+    send_invitation_mail(
+        config,
+        session=seeded,
+        person_id=paul_reader,
+        to_address="k@example.test",
+        login_url="https://x/l",
+    )
+
+    message = fake_smtp.instances[0].sent[0]
+    assert message["Subject"] == "Ein Adventskalender für Paul, und du liest vor"
+    assert "Emma" not in plain_text(message)
+
+
+def test_reminder_ignores_instance_child_name(seeded, config, fake_smtp):
+    settings.get_einstellungen(seeded).kind_name = "Alt"
+    seeded.commit()
+
+    send_reminder_mail(
+        config,
+        session=seeded,
+        person_id=_reader(seeded),
+        to_address="k@example.test",
+        display_name="Klaus",
+        open_days=[3],
+        login_url="https://x/l",
+    )
+
+    assert "für Alt" not in plain_text(fake_smtp.instances[0].sent[0])

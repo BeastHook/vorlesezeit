@@ -186,7 +186,7 @@ def test_tonie_without_calendar_shows_hint_and_only_manual_run(
 
     auslieferung = admin_client.get("/admin/auslieferung").text
     assert "Manueller Lauf" in auslieferung
-    assert "Ersatzbeitrag (R21)" not in auslieferung
+    assert "Ersatzbeitrag · " not in auslieferung
     assert "Nächster Lauf" not in auslieferung
 
 

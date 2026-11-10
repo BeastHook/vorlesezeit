@@ -12,5 +12,9 @@
    neu taggen. Beide Pakete müssen auf ghcr.io öffentlich sein.
 4. Release auf GitHub anlegen (`gh release create v<version>`). **Erste Zeile
    der Notizen:** `dringend: ja` oder `dringend: nein`. Vom 1. bis 25.12.
-   bieten Freunde-Instanzen nur `dringend: ja` als Update an.
+   bieten Freunde-Instanzen nur `dringend: ja` als Update an. Dazu die drei
+   Startdateien als Assets anhängen: `Vorlesezeit-installieren-Mac.zip` (enthält
+   `Vorlesezeit installieren.command`), `Vorlesezeit.installieren.bat` und
+   `install.sh`. GitHub ersetzt das Leerzeichen im Namen der `.bat` durch einen
+   Punkt.
 5. Kein `latest`: Freunde ziehen nur Versionen, die ihr Wartungsassistent nennt.

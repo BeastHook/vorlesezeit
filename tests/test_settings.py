@@ -23,7 +23,7 @@ from app import settings as st
 from app.auth.tokens import create_magic_link_token
 from app.config import ConfigError, load_config
 from app.db import init_db
-from app.models import CreativeTonie, Einstellungen, Person, TonieKonto
+from app.models import Auftrag, Campaign, CreativeTonie, Einstellungen, Person, Slot, TonieKonto
 from tests.conftest import REQUIRED_ENV
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -140,10 +140,6 @@ def test_ae4_seed_once_service_value_survives_restart_and_cleared_stays_empty(en
         assert st.admin_display_name(s) == "Vom Setup"
         assert st.delivery_time_for(s, date(2026, 12, 1)) == time(18, 30)
         st.set_value(s, "admin_display_name", None, now=NOW)
-        st.set_value(s, "kind_name", "Emma", now=NOW)
-        assert st.kind_name(s) == "Emma"
-        st.set_value(s, "kind_name", None, now=NOW)
-        assert st.kind_name(s) is None
         st.set_value(s, "invitation_date", None, now=NOW)
     env["INVITATION_DATE"] = "2026-11-01"
     _start(engine, env)
@@ -589,3 +585,116 @@ def test_remember_address_fills_empty_text(engine):
         s.commit()
         assert st.remember_public_address(s, URL(f"{ADVENT}/admin")) is True
         assert st.get_einstellungen(s).oeffentliche_adresse == ADVENT
+
+
+# --- Kindername nur noch je Kalender (Factory-Job 032) ----------------------
+
+
+def _kalender(db, kind: str | None) -> Campaign:
+    campaign = Campaign(name=f"Kalender {kind}", kind_name=kind)
+    db.add(campaign)
+    db.commit()
+    return campaign
+
+
+def _vorleser(db, email: str = "gerda@example.test") -> Person:
+    person = Person(email=email, display_name="Oma Gerda")
+    db.add(person)
+    db.commit()
+    return person
+
+
+def _geschichte(db, person: Person, *calendars: Campaign) -> Auftrag:
+    auftrag = Auftrag(person_id=person.id, title="Sterne zählen")
+    db.add(auftrag)
+    for day, campaign in enumerate(calendars, start=3):
+        db.add(Slot(campaign_id=campaign.id, day=day, auftrag=auftrag))
+    db.commit()
+    return auftrag
+
+
+def test_kind_name_is_no_longer_a_simple_setting(db_session):
+    with pytest.raises(st.SettingsError):
+        st.set_value(db_session, "kind_name", "Emma", now=NOW)
+    assert not hasattr(st, "kind_name")
+
+
+def test_calendar_kind_name_ignores_instance_value(db_session):
+    st.get_einstellungen(db_session).kind_name = "Alt"
+    leer = _kalender(db_session, None)
+    blank = _kalender(db_session, "  ")
+    emma = _kalender(db_session, " Emma ")
+
+    assert st.calendar_kind_name(db_session, leer) == ""
+    assert st.calendar_kind_name(db_session, blank) == ""
+    assert st.calendar_kind_name(db_session, emma) == "Emma"
+
+
+def test_person_kind_name_uses_calendars_of_own_stories(db_session):
+    _kalender(db_session, "Emma")
+    paul = _kalender(db_session, "Paul")
+    gerda = _vorleser(db_session)
+    _geschichte(db_session, gerda, paul)
+
+    assert st.person_kind_name(db_session, gerda.id) == "Paul"
+
+
+def test_person_kind_name_joins_names_by_calendar_id(db_session):
+    emma = _kalender(db_session, "Emma")
+    paul = _kalender(db_session, "Paul")
+    mia = _kalender(db_session, "Mia")
+    gerda = _vorleser(db_session)
+    _geschichte(db_session, gerda, mia, emma)
+    _geschichte(db_session, gerda, paul)
+
+    assert st.person_kind_name(db_session, gerda.id) == "Emma, Paul und Mia"
+
+
+def test_person_kind_name_two_calendars(db_session):
+    emma = _kalender(db_session, "Emma")
+    paul = _kalender(db_session, "Paul")
+    gerda = _vorleser(db_session)
+    _geschichte(db_session, gerda, emma, paul)
+
+    assert st.person_kind_name(db_session, gerda.id) == "Emma und Paul"
+
+
+def test_person_kind_name_skips_empty_and_duplicate_names(db_session):
+    emma = _kalender(db_session, "Emma")
+    leer = _kalender(db_session, None)
+    noch_emma = _kalender(db_session, "Emma")
+    gerda = _vorleser(db_session)
+    _geschichte(db_session, gerda, emma, leer, noch_emma)
+
+    assert st.person_kind_name(db_session, gerda.id) == "Emma"
+
+
+def test_person_kind_name_without_stories_uses_all_calendars(db_session):
+    _kalender(db_session, "Emma")
+    _kalender(db_session, "Paul")
+    gerda = _vorleser(db_session)
+    andere = _vorleser(db_session, "klaus@example.test")
+    entwurf = Auftrag(person_id=gerda.id, title="Entwurf ohne Tag")
+    db_session.add(entwurf)
+    db_session.commit()
+
+    assert st.person_kind_name(db_session, gerda.id) == "Emma und Paul"
+    assert st.person_kind_name(db_session, andere.id) == "Emma und Paul"
+
+
+def test_person_kind_name_is_none_without_any_name(db_session):
+    st.get_einstellungen(db_session).kind_name = "Alt"
+    db_session.commit()
+    leer = _kalender(db_session, None)
+    gerda = _vorleser(db_session)
+
+    assert st.person_kind_name(db_session, gerda.id) is None
+    _geschichte(db_session, gerda, leer)
+    assert st.person_kind_name(db_session, gerda.id) is None
+
+
+def test_join_names_formats_lists():
+    assert st.join_names([]) == ""
+    assert st.join_names(["Emma"]) == "Emma"
+    assert st.join_names(["Emma", "Paul"]) == "Emma und Paul"
+    assert st.join_names(["Emma", "Paul", "Mia"]) == "Emma, Paul und Mia"

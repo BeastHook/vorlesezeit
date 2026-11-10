@@ -31,7 +31,12 @@ from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.admin.state import auftrag_slots, deliverable_beitrag, is_deliverable
+from app.admin.state import (
+    DAY_DELIVERY_RUN_TYPES,
+    auftrag_slots,
+    deliverable_beitrag,
+    is_deliverable,
+)
 from app.delivery.audio import apply_cut, probe_duration_seconds
 from app.delivery.chapters import (
     AppChapter,
@@ -87,6 +92,21 @@ HINWEIS_RAHMEN_ABGELEHNT = (
     "Ohne Rahmen ausgeliefert: Die Toniecloud hat das Kapitel mit Rahmen abgelehnt ({grund})."
 )
 HINWEIS_PROBE_OHNE_RAHMEN = "Rahmen ließ sich nicht bauen, Datei ohne Rahmen hochgeladen."
+
+# Job 040: Hinweise in `reason`, wenn ein verpasster Tag als zweites Kapitel
+# nachgeholt wurde oder nicht.
+HINWEIS_NACHGEHOLT = (
+    "Türchen {tag} nachgeholt: Die Geschichte steht als zweites Kapitel hinter der Tagesgeschichte."
+)
+HINWEIS_NACHHOLEN_LADEN = (
+    "Türchen {tag} nicht nachgeholt: Die Geschichte ließ sich nicht laden ({grund})."
+)
+HINWEIS_NACHHOLEN_PLATZ = (
+    "Türchen {tag} nicht nachgeholt: Für beide Geschichten fehlt Platz auf dem Tonie."
+)
+HINWEIS_NACHHOLEN_ABGELEHNT = (
+    "Türchen {tag} nicht nachgeholt: Die Toniecloud hat das Kapitel-Paar abgelehnt ({grund})."
+)
 
 
 @dataclass
@@ -445,6 +465,8 @@ def _run_locked(
     if beitrag is None:
         return _record(db, tonie, run_type, target_day, False, missing_reason)
 
+    verpasst = _nachzuholen(db, tonie, campaign, target_day, beitrag)
+
     household_id = client.find_household_id(tonie_id)
     baseline = client.get_state(household_id, tonie_id)
     app = load_app_chapters(tonie.app_chapters)
@@ -461,22 +483,38 @@ def _run_locked(
             used_replacement=used_replacement,
         )
 
+    nachholen = _prepare_nachholen(storage, verpasst)
+
     attempt = _attempt_single_chapter(
-        db, client, storage, campaign, beitrag, slot, household_id, tonie_id, baseline, app
+        db,
+        client,
+        storage,
+        campaign,
+        beitrag,
+        slot,
+        household_id,
+        tonie_id,
+        baseline,
+        app,
+        nachholen=nachholen,
     )
     any_patch_happened = attempt.patched
 
     if attempt.success:
-        _mark_verified(tonie, target_day, beitrag.id, attempt.chapter_id, attempt.seconds)
+        _mark_verified(tonie, target_day, beitrag.id, attempt)
         return _record(
             db,
             tonie,
             run_type,
             target_day,
             True,
-            _with_note(missing_reason if used_replacement else None, attempt.note),
+            _with_note(
+                _with_note(missing_reason if used_replacement else None, attempt.note),
+                nachholen.note if nachholen is not None else None,
+            ),
             used_beitrag_id=beitrag.id,
             used_replacement=used_replacement,
+            beitrag_ids=[beitrag.id, nachholen.beitrag.id] if attempt.extra_chapter_id else None,
             title_mismatches=attempt.title_mismatches,
             changed_tonie=True,
         )
@@ -502,10 +540,11 @@ def _run_locked(
             baseline,
             app,
             ohne_rahmen=ohne_rahmen,
+            nachholen=nachholen,
         )
         any_patch_happened = any_patch_happened or attempt2.patched
         if attempt2.success:
-            _mark_verified(tonie, target_day, rep_beitrag.id, attempt2.chapter_id, attempt2.seconds)
+            _mark_verified(tonie, target_day, rep_beitrag.id, attempt2)
             return _record(
                 db,
                 tonie,
@@ -513,11 +552,18 @@ def _run_locked(
                 target_day,
                 True,
                 _with_note(
-                    f"Tagesbeitrag fehlgeschlagen ({attempt.reason}); Ersatzbeitrag ausgeliefert.",
-                    attempt2.note,
+                    _with_note(
+                        f"Tagesbeitrag fehlgeschlagen ({attempt.reason}); "
+                        "Ersatzbeitrag ausgeliefert.",
+                        attempt2.note,
+                    ),
+                    nachholen.note if nachholen is not None else None,
                 ),
                 used_beitrag_id=rep_beitrag.id,
                 used_replacement=True,
+                beitrag_ids=(
+                    [rep_beitrag.id, nachholen.beitrag.id] if attempt2.extra_chapter_id else None
+                ),
                 title_mismatches=attempt2.title_mismatches,
                 changed_tonie=True,
             )
@@ -531,6 +577,80 @@ def _run_locked(
         )
 
     return _record(db, tonie, run_type, target_day, False, combined_reason)
+
+
+@dataclass
+class _Nachholen:
+    """Job 040: die verpasste Geschichte von Tag N, geladen und zugeschnitten,
+    als zweites Kapitel hinter der Tagesgeschichte. `active` faellt fuer den Rest
+    des Laufs weg, sobald sie nicht mehr mitgeht; `note` ist der Hinweis dazu
+    (oder, nach Erfolg, dass sie nachgeholt wurde)."""
+
+    beitrag: Beitrag
+    slot: Slot
+    data: bytes = b""
+    seconds: float = 0.0
+    active: bool = True
+    note: str | None = None
+
+    def drop(self, note: str) -> None:
+        self.active = False
+        self.note = note
+
+
+def _nachzuholen(
+    db: Session, tonie: CreativeTonie, campaign: Campaign, target_day: int, beitrag: Beitrag
+) -> tuple[Beitrag, Slot] | None:
+    """Job 040 (R1-R6): die freigegebene Geschichte von Tag N = Zieltag - 1, wenn
+    dort der Ersatzbeitrag gespielt hat und sie erst danach freigegeben wurde."""
+    day = target_day - 1
+    slot = _calendar_day(db, campaign, day)
+    nachgeholt = deliverable_beitrag(slot) if slot is not None else None
+    if nachgeholt is None or nachgeholt.id in (beitrag.id, campaign.replacement_beitrag_id):
+        return None
+    latest = (
+        db.execute(
+            select(DeliveryRun)
+            .where(
+                DeliveryRun.tonie_id == tonie.tonie_id,
+                DeliveryRun.campaign_id == campaign.id,
+                DeliveryRun.target_day == day,
+                DeliveryRun.run_type.in_(DAY_DELIVERY_RUN_TYPES),
+                DeliveryRun.outcome.in_(("erfolg", "ersatzbeitrag", "fehlschlag")),
+            )
+            .order_by(DeliveryRun.started_at.desc(), DeliveryRun.id.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if latest is None or latest.outcome != "ersatzbeitrag":
+        return None
+    if nachgeholt.approved_at is None or nachgeholt.approved_at <= latest.started_at:
+        return None
+    return nachgeholt, slot
+
+
+def _prepare_nachholen(
+    storage: ObjectStorage, found: tuple[Beitrag, Slot] | None
+) -> _Nachholen | None:
+    """Job 040 (R7, R8): laedt und schneidet die nachzuholende Geschichte einmal
+    vor dem ersten Upload, ohne Rahmen."""
+    if found is None:
+        return None
+    nachgeholt, slot = found
+    result = _Nachholen(nachgeholt, slot)
+    try:
+        data = storage.get(nachgeholt.audio_object_key)
+        data = apply_cut(
+            data,
+            start_seconds=nachgeholt.cut_start_seconds,
+            end_seconds=nachgeholt.cut_end_seconds,
+        )
+        result.data, result.seconds = data, probe_duration_seconds(data)
+    except Exception as exc:
+        result.drop(HINWEIS_NACHHOLEN_LADEN.format(tag=slot.day, grund=_error_detail(exc)))
+    return result
 
 
 def _calendar_day(db: Session, campaign: Campaign, day: int) -> Slot | None:
@@ -643,6 +763,9 @@ class _AttemptResult:
     rejected: bool = False
     note: str | None = None  # Hinweis "ohne Rahmen" fuer `reason`
     frame_rejection: str | None = None  # Grund, wenn das Kapitel mit Rahmen abgelehnt wurde
+    # Job 040: Platz 2, wenn der verpasste Tag mitging.
+    extra_chapter_id: str | None = None
+    extra_seconds: float | None = None
 
 
 def _failed_attempt(exc: Exception, *, rejected: bool) -> _AttemptResult:
@@ -671,6 +794,7 @@ def _attempt_single_chapter(
     app: Sequence[AppChapter],
     *,
     ohne_rahmen: str | None = None,
+    nachholen: _Nachholen | None = None,
 ) -> _AttemptResult:
     """Ein Beitrag nach der Kaskade aus KTD4: erst mit Rahmen, scheitert das,
     dieselbe Geschichte ohne Rahmen. Scheitern Laden oder Zuschnitt, liegt es
@@ -698,6 +822,7 @@ def _attempt_single_chapter(
             tonie_id,
             baseline,
             app,
+            nachholen,
         )
 
     note = ohne_rahmen
@@ -738,11 +863,49 @@ def _upload_chapter(
     tonie_id: str,
     baseline: CreativeTonieState,
     app: Sequence[AppChapter],
+    nachholen: _Nachholen | None = None,
 ) -> _AttemptResult:
-    """Ersetzt die App-Kapitel durch genau ein neues an Platz 1; der Bestand
-    aus dem Rueckfallstand bleibt unveraendert dahinter (U16, R49). Zu wenig
-    Platz wird vor dem Hochladen erkannt -- dann kein Upload, kein PATCH (R50)."""
-    space_reason = missing_space(space_for(baseline, app, limits), [seconds])
+    """Ersetzt die App-Kapitel durch das neue an Platz 1, bei `nachholen` dazu
+    die verpasste Geschichte an Platz 2; der Bestand aus dem Rueckfallstand
+    bleibt unveraendert dahinter (U16, R49). Zu wenig Platz wird vor dem
+    Hochladen erkannt -- dann kein Upload, kein PATCH (R50). Job 040: Platz 1
+    hat Vorrang; fehlt nur fuer beide Platz oder lehnt die Toniecloud das Paar
+    ab, geht Platz 1 allein hoch und die verpasste Geschichte entfaellt."""
+    pair = nachholen if nachholen is not None and nachholen.active else None
+    if pair is not None:
+        space = space_for(baseline, app, limits)
+        if missing_space(space, [seconds, pair.seconds]) is not None:
+            if missing_space(space, [seconds]) is None:
+                pair.drop(HINWEIS_NACHHOLEN_PLATZ.format(tag=pair.slot.day))
+            pair = None
+    result = _upload_attempt(
+        client, limits, data, seconds, beitrag, slot, household_id, tonie_id, baseline, app, pair
+    )
+    if pair is None or result.success or not result.rejected:
+        return result
+    pair.drop(HINWEIS_NACHHOLEN_ABGELEHNT.format(tag=pair.slot.day, grund=result.reason))
+    retry = _upload_attempt(
+        client, limits, data, seconds, beitrag, slot, household_id, tonie_id, baseline, app, None
+    )
+    retry.patched = retry.patched or result.patched
+    return retry
+
+
+def _upload_attempt(
+    client: TonieCloudClient,
+    limits: ConfigLimits,
+    data: bytes,
+    seconds: float,
+    beitrag: Beitrag,
+    slot: Slot | None,
+    household_id: str,
+    tonie_id: str,
+    baseline: CreativeTonieState,
+    app: Sequence[AppChapter],
+    pair: _Nachholen | None,
+) -> _AttemptResult:
+    new_seconds = [seconds] if pair is None else [seconds, pair.seconds]
+    space_reason = missing_space(space_for(baseline, app, limits), new_seconds)
     if space_reason is not None:
         return _AttemptResult(False, space_reason, None, False)
     try:
@@ -750,27 +913,43 @@ def _upload_chapter(
         validate_format(filename, limits)
         target = client.create_file()
         client.upload_bytes(target, data, filename=filename, content_type="audio/mpeg")
+        pair_target = None
+        if pair is not None:
+            pair_filename = f"beitrag-{pair.beitrag.id}.mp3"
+            pair_target = client.create_file()
+            client.upload_bytes(
+                pair_target, pair.data, filename=pair_filename, content_type="audio/mpeg"
+            )
     except Exception as exc:
         return _failed_attempt(exc, rejected=True)
 
     title = chapter_title_for(beitrag, slot)
+    new_chapters = [Chapter(title=title, file=target.file_id)]
+    if pair is not None:
+        new_chapters.append(
+            Chapter(title=chapter_title_for(pair.beitrag, pair.slot), file=pair_target.file_id)
+        )
     stock = stock_of(baseline, app)
     try:
-        patch_state = client.replace_chapters(
-            household_id, tonie_id, [Chapter(title=title, file=target.file_id), *stock]
-        )
+        patch_state = client.replace_chapters(household_id, tonie_id, [*new_chapters, *stock])
         final_state = client.wait_until_processed(household_id, tonie_id)
     except Exception as exc:
         return _AttemptResult(
             False, f"Ersetzen fehlgeschlagen: {_error_detail(exc)}", None, True, rejected=True
         )
 
-    failure, title_mismatches = _verify_with_stock(patch_state, final_state, [title], stock)
+    failure, title_mismatches = _verify_with_stock(
+        patch_state, final_state, [c.title for c in new_chapters], stock
+    )
     if failure is not None:
         return _AttemptResult(False, failure, None, True, rejected=True)
 
-    chapter_id = final_state.chapters[0].id
-    return _AttemptResult(True, None, chapter_id, True, title_mismatches, seconds)
+    result = _AttemptResult(True, None, final_state.chapters[0].id, True, title_mismatches, seconds)
+    if pair is not None:
+        pair.note = HINWEIS_NACHGEHOLT.format(tag=pair.slot.day)
+        result.extra_chapter_id = final_state.chapters[1].id
+        result.extra_seconds = pair.seconds
+    return result
 
 
 def _run_manual(
@@ -1008,16 +1187,19 @@ def _mark_verified(
     tonie: CreativeTonie,
     target_day: int,
     beitrag_id: int,
-    chapter_id: str | None,
-    seconds: float | None,
+    attempt: _AttemptResult,
 ) -> None:
     tonie.verified_beitrag_id = beitrag_id
-    tonie.verified_chapter_id = chapter_id
+    tonie.verified_chapter_id = attempt.chapter_id
     tonie.verified_for_day = target_day
     # U16: das aufgespielte Kapitel ist ab jetzt App-Kapitel, kein Bestand (KTD20).
-    tonie.app_chapters = (
-        dump_app_chapters([AppChapter(chapter_id, seconds)]) if chapter_id else None
-    )
+    # Job 040: ebenso das nachgeholte an Platz 2; verified_* beschreibt nur Platz 1.
+    app = []
+    if attempt.chapter_id:
+        app.append(AppChapter(attempt.chapter_id, attempt.seconds))
+    if attempt.extra_chapter_id:
+        app.append(AppChapter(attempt.extra_chapter_id, attempt.extra_seconds))
+    tonie.app_chapters = dump_app_chapters(app) if app else None
 
 
 def _record(

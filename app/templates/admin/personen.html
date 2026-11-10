@@ -10,6 +10,7 @@
 </div>
 {% endif %}
 <h3>Verwandte</h3>
+{% if remind_count %}<p style="margin:0 0 var(--space-3)"><a class="btn btn-secondary" href="/admin/personen/alle-erinnern">Alle mit offenen Türchen erinnern ({{ remind_count }})</a></p>{% endif %}
 <div class="person-list">
   {% for row in rows %}
   <div class="person-row">
@@ -28,7 +29,10 @@
       <form method="post" action="/admin/personen/{{ row.person.id }}/einladen">
         <button type="submit" class="btn {% if row.uninvited %}btn-primary btn-inline{% else %}btn-ghost{% endif %}" data-busy="Wird verschickt …" data-done="Verschickt ✓">Einladung schicken</button>
       </form>
-      <a class="btn btn-danger" href="/admin/personen/{{ row.person.id }}/widerrufen">Zugang widerrufen</a>
+      {% if row.person.revoked_at %}<form method="post" action="/admin/personen/{{ row.person.id }}/widerruf-aufheben">
+        <button type="submit" class="btn btn-secondary">Widerruf aufheben</button>
+      </form>
+      {% else %}<a class="btn btn-danger" href="/admin/personen/{{ row.person.id }}/widerrufen">Zugang widerrufen</a>{% endif %}
       <a class="btn btn-ghost" href="/admin/personen/{{ row.person.id }}/loeschen">Löschen …</a>
     </div>
   </div>

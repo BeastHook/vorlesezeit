@@ -156,12 +156,6 @@ def _kind_names(db: Session, campaign_ids: set[int]) -> list[str]:
     return names
 
 
-def _join_names(names: list[str]) -> str:
-    if len(names) <= 1:
-        return "".join(names)
-    return ", ".join(names[:-1]) + " und " + names[-1]
-
-
 def _build_message(
     config: Config,
     db: Session,
@@ -171,7 +165,7 @@ def _build_message(
     mailart: str,
     address: str | None,
 ) -> EmailMessage:
-    kind = _join_names(kinds)
+    kind = settings.join_names(kinds)
     greeting = f"Hallo {person.display_name}," if person.display_name else "Hallo,"
     context = {
         "greeting": greeting,

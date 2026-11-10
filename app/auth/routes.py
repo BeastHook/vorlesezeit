@@ -100,7 +100,7 @@ def show_confirm_page(request: Request, token: str, next: str = "", db: Session 
             "token": token,
             "next": _safe_next(next),
             "person": person,
-            "kind": settings.kind_name(db),
+            "kind": settings.person_kind_name(db, person.id),
             "valid_until": german_date(settings.magic_link_valid_until(db)),
         },
     )

@@ -260,14 +260,16 @@ def test_heute_mail_without_kind_name_and_title(morgen, db_session):
     assert "für" not in text.split("Danke")[0]
 
 
-def test_heute_mail_uses_instance_kind_name_when_calendar_has_none(morgen, db_session):
+def test_heute_mail_ignores_instance_kind_name_when_calendar_has_none(morgen, db_session):
     settings.get_einstellungen(db_session).kind_name = "Emma"
     db_session.commit()
-    delivered(db_session, kind=None)
+    delivered(db_session, kind=None, title=None)
 
     morgen(berlin(2026, 12, 5, 7, 0))
 
-    assert "auf dem Tonie für Emma deine Geschichte" in plain_text(mails_to(OMA)[0])
+    text = plain_text(mails_to(OMA)[0])
+    assert "heute Morgen wartet auf dem Tonie deine Geschichte." in text
+    assert "Emma" not in text
 
 
 def test_mirrored_tonies_and_two_calendars_send_exactly_one_mail_ae8(morgen, db_session):

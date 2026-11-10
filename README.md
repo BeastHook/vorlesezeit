@@ -27,12 +27,13 @@ hört das Kind die Stimme von Oma, Onkel oder Patentante.
 Wer vorliest, sieht nur das Nötige: den Vorlesetext, einen großen Knopf und die Zeit.
 
 <p align="center">
-  <img src=".github/readme/aufnehmen.gif" alt="Aufnahme am Handy: Aufnehmen, Lichtkranz im Takt der Stimme, anhören, abschicken, Wachssiegel" width="300">
+  <img src=".github/readme/aufnehmen.gif" alt="Aufnahme am Handy: Datei-Knopf, Lauftext starten, Aufnehmen, Lichtkranz im Takt der Stimme, anhören, abschicken, Wachssiegel" width="300">
 </p>
 
 - **Ein Tipp genügt.** Der Link aus der Mail meldet direkt an. Wer noch eine Geschichte offen hat, landet sofort beim Text.
 - **Lichtkranz im Takt der Stimme.** Er zeigt, dass das Mikrofon etwas hört, ganz ohne Pegelanzeige.
-- **Text scrollt mit.** Tempo und Schriftgröße lassen sich mit je einem Regler anpassen.
+- **Lauftext auf Knopfdruck.** Der Vorlesetext steht still, bis du den runden Knopf „Lauftext“ neben „Aufnehmen“ drückst. Mit den Reglern „Tempo“ und „Schrift“ stellst du Geschwindigkeit und Schriftgröße ein.
+- **Fertige Datei hochladen.** Hast du die Geschichte schon aufgenommen, wählst du über den Knopf „Datei“ eine Audiodatei aus und schickst sie ab. Das geht auch bei einer freien Nachricht.
 - **Erst anhören, dann abschicken.** Neu aufnehmen geht beliebig oft.
 - **Saubere Lautstärke.** Jede Aufnahme wird auf dem Server per ffmpeg zweistufig auf eine einheitliche Lautheit gebracht.
 - **Hilfe bei Problemen.** Ist das Mikrofon gesperrt, erklärt die Seite in Ruhe, was zu tun ist. Bei einem In-App-Browser (Instagram, Facebook …) zeigt sie, wie man die Seite im richtigen Browser öffnet.
@@ -57,7 +58,7 @@ Reiter für alles Weitere.
 |---|---|
 | <img src=".github/readme/kalender.jpg" alt="Kalender mit 24 Türchen, Zustand je Tag" width="430"> | <img src=".github/readme/personen.jpg" alt="Personen mit Einladungs- und Erinnerungsstatus" width="430"> |
 | **Auslieferung** | **Setup** |
-| <img src=".github/readme/auslieferung.jpg" alt="Auslieferung: nächster Lauf, Ersatzbeitrag, Platz auf dem Tonie, manueller Lauf" width="430"> | <img src=".github/readme/setup.jpg" alt="Setup: Kalender, tonies-Konten, Mailversand, Termine, Namen" width="430"> |
+| <img src=".github/readme/auslieferung.jpg" alt="Auslieferung: nächster Lauf, Ersatzbeitrag, Platz auf dem Tonie, manueller Lauf" width="430"> | <img src=".github/readme/setup.jpg" alt="Setup: Kalender mit Kindername, Vorspann und Abspann" width="430"> |
 
 - **Freigabe vor dem Tonie.** Jede Aufnahme kann vorher angehört, zugeschnitten, mit einem Kapitelnamen versehen, freigegeben oder mit einer freundlichen Mail abgelehnt werden.
 - **Ersatzbeitrag.** Fehlt die Geschichte eines Tages oder verwirft der Tonie die Datei, springt ein vorher festgelegter Beitrag ein.
@@ -65,6 +66,9 @@ Reiter für alles Weitere.
 - **Bestand bleibt.** Nur die Kapitel, die Vorlesezeit selbst aufgespielt hat, werden ersetzt. Am 25.12. räumt die App ihr Kapitel wieder ab.
 - **Mehrere Kalender und Tonies.** Mehrere tonies-Konten und gespiegelte Tonies sind möglich, ebenso Geschichten, die in mehreren Kalendern liegen.
 - **Erinnerungen, Einladungen, Widerruf.** Für jede Person gibt es einen sichtbaren Status, und der Zugang lässt sich mit einem Klick entziehen.
+- **Rahmen.** Jeder Kalender kann einen Vorspann (die Melodie „Leise rieselt der Schnee“ oder eine eigene Datei) und einen Abspann bekommen. Beides wird beim Aufspielen um die Geschichte gelegt. Im Reiter Setup schaltet „Rahmen in diesem Advent aus“ den Rahmen für alle Kalender ab.
+- **Begrüßung.** Beim Zuweisen setzt die App einmal „Hallo Emma, hier ist Oma Hilde.“ an den Anfang des Vorlesetexts. Danach gehört der Absatz dir.
+- **Morgen-Mails.** Vom 1. bis 25.12. bekommt die vorlesende Person am Morgen eine Mail, dass ihre Geschichte heute auf dem Tonie liegt. Am Folgetag kommt die Archiv-Mail mit dem Link zum Familienarchiv.
 - **Trockenlauf und manueller Lauf.** Damit lässt sich die Strecke zum Tonie vorab testen oder ein Tag sofort aufspielen.
 
 ---
@@ -79,7 +83,7 @@ Adresse `<name>.vorlesezeit.app` und der Mailversand sind darin schon enthalten.
 2. **Startdatei herunterladen** – im neuesten [Release](https://github.com/BeastHook/vorlesezeit/releases/latest)
    unter „Assets“:
    - Mac: `Vorlesezeit-installieren-Mac.zip` entpacken, dann `Vorlesezeit installieren.command`
-   - Windows: `Vorlesezeit installieren.bat`
+   - Windows: `Vorlesezeit.installieren.bat`
    - Linux/NAS: `install.sh`, oder direkt im Terminal
      `curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v<version>/installer/start/install.sh | sh`
 3. **Doppelklick auf die Startdatei.** Beim ersten Mal warnt das System, weil die Datei nicht signiert ist:
@@ -93,6 +97,9 @@ Adresse `<name>.vorlesezeit.app` und der Mailversand sind darin schon enthalten.
    **Setup** das tonies-Konto eintragen.
 
 Der Computer muss im Advent abends laufen, sonst kommt die Geschichte nicht auf den Tonie.
+
+**Updates.** Gibt es eine neue Version, erscheint im Admin-Bereich der Balken „Update verfügbar“. Startest du die Startdatei dann erneut, öffnet sich die Wartung im Assistenten. Vom 1. bis 25.12. sind nur Updates mit `dringend: ja` möglich.
+
 Technische Details (was die Startdatei genau tut, Neustart nach einem Fehlschlag, NAS ohne
 Bildschirm): [`docs/betrieb.md`](docs/betrieb.md#installation-beim-freund).
 
@@ -115,7 +122,7 @@ Nach dem ersten Start steht ohne Mailzugang ein einmaliger Einrichtungslink im L
 docker compose logs app | grep einrichtung
 ```
 
-Alle weiteren Einstellungen (tonies-Konto, Mailversand, Lieferzeit, Kindername) pflegt man
+Alle weiteren Einstellungen (tonies-Konto, Mailversand, Lieferzeit, Kindername, Rahmen, öffentliche Adresse) pflegt man
 im Reiter **Setup**. Zugangsdaten liegen verschlüsselt in der Datenbank.
 
 ---
@@ -150,7 +157,7 @@ docker compose up -d s3
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
-ruff check . && ruff format --check app tests scripts
+ruff check . && ruff format --check app tests scripts installer
 ```
 
 ---

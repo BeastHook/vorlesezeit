@@ -6,7 +6,7 @@
   <div class="panel-kicker">Zugang widerrufen</div>
   <h3>{{ name }}</h3>
   <p class="meta">{{ person.email }}</p>
-  <p>Alle ausstehenden Links und laufenden Sitzungen von {{ name }} werden sofort und auf einmal ungültig. Die Adresse bleibt angelegt. {{ name }} kann sich später über die Anmeldeseite einen neuen Link schicken lassen.</p>
+  <p>Alle ausstehenden Links und laufenden Sitzungen von {{ name }} werden sofort und auf einmal ungültig. Die Adresse bleibt angelegt. {{ name }} kann sich später über die Anmeldeseite einen neuen Link schicken lassen. Einladung und Erinnerung gehen erst wieder, wenn du „Widerruf aufheben“ drückst.</p>
   <form method="post" action="/admin/personen/{{ person.id }}/widerrufen" class="btn-row-left">
     <button type="submit" class="btn btn-danger btn-inline">Zugang widerrufen</button>
     <a class="btn btn-ghost btn-inline" href="/admin/personen">Abbrechen</a>

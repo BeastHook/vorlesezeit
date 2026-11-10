@@ -1,0 +1,11 @@
+{{ greeting }}
+
+{% if kind %}{{ kind }} hat dir auf deine Geschichte geantwortet.{% else %}Es gibt eine Antwort auf deine Geschichte.{% endif %} Du findest die Antwort im Archiv unter „Antwort für dich“.
+
+Über diesen Link kommst du direkt ins Archiv:
+
+{{ login_url }}
+
+Viel Freude beim Anhören!
+
+{{ gruss }}

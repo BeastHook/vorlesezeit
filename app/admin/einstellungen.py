@@ -289,7 +289,6 @@ def _page(
             "current_delivery": row.delivery_time or "",
             "name_hinweise": _hinweise(data, ("admin_display_name",)),
             "display_name": row.admin_display_name or "",
-            "kind_name": row.kind_name or "",
             "rahmen_aus": row.rahmen_aus,
             "oeffentliche_adresse": row.oeffentliche_adresse or "",
             "version": app.__version__,
@@ -322,10 +321,11 @@ def setup_status(db: Session = Depends(get_db), _admin=Depends(require_admin)):
 # --- Kalender (R17) ------------------------------------------------------------------
 
 
-def create_calendar(db: Session, name: str) -> Campaign:
+def create_calendar(db: Session, name: str, kind_name: str) -> Campaign:
     """Ein Kalender mit 24 Tagen. `app/admin/setup.py::create_campaign`
     erlaubt nur eine Kampagne; mehrere Kalender legt das Setup an."""
     calendar = new_campaign(db, name=name)
+    calendar.kind_name = kind_name
     db.commit()
     return calendar
 
@@ -334,14 +334,19 @@ def create_calendar(db: Session, name: str) -> Campaign:
 def create_calendar_route(
     request: Request,
     name: str = Form(""),
+    kind_name: str = Form(""),
     db: Session = Depends(get_db),
     _admin=Depends(setup_admin),
 ):
     name = name.strip()
+    kind_name = kind_name.strip()
     if not name:
         flash(request, "Bitte einen Namen für den Kalender eingeben.", "err")
         return redirect(f"{PAGE}#s-kal")
-    create_calendar(db, name)
+    if not kind_name:
+        flash(request, "Bitte einen Kindernamen für den Kalender eingeben.", "err")
+        return redirect(f"{PAGE}#s-kal")
+    create_calendar(db, name, kind_name)
     flash(request, f"Kalender „{name}“ mit 24 Tagen angelegt.")
     return redirect(f"{PAGE}#s-kal")
 
@@ -355,17 +360,18 @@ def rename_calendar_route(
     db: Session = Depends(get_db),
     _admin=Depends(setup_admin),
 ):
-    """Name und Kindername des Kalenders (R15); leerer Kindername: es gilt
-    der aus "Namen"."""
+    """Name und Kindername des Kalenders (R15); beide sind Pflicht."""
     calendar = db.get(Campaign, calendar_id)
     if calendar is None:
         raise HTTPException(status_code=404)
     name = name.strip()
     if not name:
         flash(request, "Ein Kalender braucht einen Namen.", "err")
+    elif not kind_name.strip():
+        flash(request, "Ein Kalender braucht einen Kindernamen.", "err")
     else:
         calendar.name = name
-        calendar.kind_name = kind_name.strip() or None
+        calendar.kind_name = kind_name.strip()
         db.commit()
         flash(request, "Kalender gespeichert.")
     return redirect(f"{PAGE}#s-kal")
@@ -958,13 +964,11 @@ def termine_route(
 def name_route(
     request: Request,
     admin_display_name: str = Form(""),
-    kind_name: str = Form(""),
     db: Session = Depends(get_db),
     now: datetime = Depends(get_now),
     _admin=Depends(setup_admin),
 ):
     settings.set_value(db, "admin_display_name", admin_display_name.strip() or None, now=now)
-    settings.set_value(db, "kind_name", kind_name.strip() or None, now=now)
     flash(request, "Namen gespeichert.")
     return redirect(f"{PAGE}#s-name")
 

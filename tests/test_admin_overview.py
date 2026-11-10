@@ -539,21 +539,21 @@ def test_begruessung_without_child_name(admin_client: TestClient, db_session: Se
     )
 
 
-def test_begruessung_falls_back_to_instance_child_name(
+def test_begruessung_ignores_instance_child_name(
     admin_client: TestClient, db_session: Session, campaign
 ):
     from app.settings import get_einstellungen
 
     campaign.kind_name = "  "
-    get_einstellungen(db_session).kind_name = "Mila"
+    get_einstellungen(db_session).kind_name = "Alt"
     db_session.commit()
     gerda = create_person(db_session, "gerda@example.test", "Oma Gerda")
     slot = _slot(db_session, 3)
 
     _save(admin_client, slot, gerda.id, "Es war einmal")
 
-    assert _auftrag_of(db_session, slot).vorlesetext.startswith(
-        "Hallo Mila, hier ist Oma Gerda.\n\n"
+    assert _auftrag_of(db_session, slot).vorlesetext == (
+        "Hallo, hier ist Oma Gerda.\n\nEs war einmal"
     )
 
 

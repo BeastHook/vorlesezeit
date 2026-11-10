@@ -331,3 +331,15 @@ class Morgenmail(Base):
     mailart: Mapped[str] = mapped_column()
     tag: Mapped[date] = mapped_column()
     sent_at: Mapped[datetime] = mapped_column()
+
+
+class Antwort(Base):
+    """Antwort vom Kind: hoechstens eine Aufnahme je Person, nie ein Beitrag
+    (also nie im Eingang, nie freigebbar, nie auf dem Tonie)."""
+
+    __tablename__ = "antworten"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    person_id: Mapped[int] = mapped_column(ForeignKey("persons.id"), unique=True)
+    audio_object_key: Mapped[str] = mapped_column()
+    uploaded_at: Mapped[datetime] = mapped_column()

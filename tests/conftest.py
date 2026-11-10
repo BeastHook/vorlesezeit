@@ -45,6 +45,9 @@ REQUIRED_ENV = {
     # Mehrkalender U3: erfundener, fester Fernet-Schluessel (base64 von 32 x "0"),
     # damit die Startwerte samt Passwoertern uebernommen werden.
     "CREDENTIALS_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+    # Der TestClient laeuft ueber http://testserver und sendet ein
+    # Secure-Cookie nicht zurueck; ohne diese Variable waere keine Sitzung aktiv.
+    "SESSION_COOKIE_INSECURE": "1",
 }
 
 

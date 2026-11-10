@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app import create_app
 from app import settings as st
@@ -564,31 +564,51 @@ def test_display_name_is_saved(setup_client, db_session):
     assert db_session.get(Einstellungen, 1).admin_display_name == "Luca"
 
 
-def test_child_name_is_saved_and_cleared(setup_client, db_session):
-    setup_client.post(
-        "/admin/setup/name", data={"admin_display_name": "Luca", "kind_name": " Emma & Lukas "}
-    )
+def test_namen_section_has_no_child_name_field(setup_client, db_session):
+    page = setup_client.get("/admin/setup").text
+    namen = page[page.index('id="s-name"') : page.index('id="s-rahmen"')]
+
+    assert 'name="kind_name"' not in namen
+    assert "Für wen ist der Kalender?" not in namen
+    assert "aus „Namen“" not in page
+
+
+def test_namen_route_ignores_child_name(setup_client, db_session):
+    setup_client.post("/admin/setup/name", data={"admin_display_name": "Luca", "kind_name": "Emma"})
+
     db_session.expire_all()
     row = db_session.get(Einstellungen, 1)
-    assert (row.admin_display_name, row.kind_name) == ("Luca", "Emma & Lukas")
-    assert 'value="Emma &amp; Lukas"' in setup_client.get("/admin/setup").text
+    assert (row.admin_display_name, row.kind_name) == ("Luca", None)
 
-    setup_client.post("/admin/setup/name", data={"admin_display_name": "Luca", "kind_name": ""})
-    db_session.expire_all()
-    assert db_session.get(Einstellungen, 1).kind_name is None
+
+def test_calendar_child_name_hint_names_all_uses(setup_client, db_session):
+    familie = new_campaign(db_session, name="Familie")
+    db_session.commit()
+
+    page = setup_client.get("/admin/setup").text
+
+    assert f'id="kk{familie.id}" name="kind_name" value="" placeholder="Emma" required' in page
+    assert 'id="kk-neu" name="kind_name" placeholder="Emma" required' in page
+    assert (
+        "Steht in der Begrüßung im Vorlesetext, in den Morgen-Mails, in Einladung und "
+        "Erinnerung und auf den Seiten der Familie. Für mehrere Kinder einfach „Emma und Paul“."
+    ) in page
 
 
 def test_create_calendar_with_24_days_and_rename(setup_client, db_session):
-    setup_client.post("/admin/setup/kalender", data={"name": "Familie Berger"})
-    setup_client.post("/admin/setup/kalender", data={"name": "Patenkinder"})
+    setup_client.post("/admin/setup/kalender", data={"name": "Familie Berger", "kind_name": "Emma"})
+    setup_client.post("/admin/setup/kalender", data={"name": "Patenkinder", "kind_name": " Paul "})
 
     calendars = db_session.execute(select(Campaign).order_by(Campaign.id)).scalars().all()
     assert [c.name for c in calendars] == ["Familie Berger", "Patenkinder"]
+    assert [c.kind_name for c in calendars] == ["Emma", "Paul"]
     for calendar in calendars:
         days = db_session.execute(select(Slot.day).where(Slot.campaign_id == calendar.id))
         assert sorted(days.scalars()) == list(range(1, 25))
 
-    setup_client.post(f"/admin/setup/kalender/{calendars[0].id}", data={"name": "Bergers"})
+    setup_client.post(
+        f"/admin/setup/kalender/{calendars[0].id}", data={"name": "Bergers", "kind_name": "Emma"}
+    )
 
     db_session.expire_all()
     assert db_session.get(Campaign, calendars[0].id).name == "Bergers"
@@ -867,18 +887,37 @@ def test_calendar_child_name_is_saved_trimmed_and_shown(setup_client, db_session
     assert f'id="kk{familie.id}" name="kind_name" value="Mila"' in page
 
 
-def test_calendar_child_name_empty_falls_back_to_instance_name(setup_client, db_session):
+def test_calendar_without_child_name_is_not_saved(setup_client, db_session):
     familie = new_campaign(db_session, name="Familie", kind_name="Mila")
+    st.get_einstellungen(db_session).kind_name = "Emma"
     db_session.commit()
-    setup_client.post("/admin/setup/name", data={"admin_display_name": "", "kind_name": "Emma"})
 
-    setup_client.post(
-        f"/admin/setup/kalender/{familie.id}", data={"name": "Familie", "kind_name": "  "}
-    )
+    page = setup_client.post(
+        f"/admin/setup/kalender/{familie.id}", data={"name": "Bergers", "kind_name": "  "}
+    ).text
 
+    assert "Ein Kalender braucht einen Kindernamen." in page
     familie = _fresh(db_session, familie)
-    assert familie.kind_name is None
-    assert st.calendar_kind_name(db_session, familie) == "Emma"
+    assert (familie.name, familie.kind_name) == ("Familie", "Mila")
+
+
+def test_create_calendar_without_child_name_is_refused(setup_client, db_session):
+    before = db_session.scalar(select(func.count(Campaign.id)))
+
+    page = setup_client.post(
+        "/admin/setup/kalender", data={"name": "Familie Berger", "kind_name": " "}
+    ).text
+
+    assert "Bitte einen Kindernamen für den Kalender eingeben." in page
+    assert db_session.scalar(select(func.count(Campaign.id))) == before
+
+
+def test_calendar_kind_name_empty_ignores_instance_name(db_session):
+    familie = new_campaign(db_session, name="Familie")
+    st.get_einstellungen(db_session).kind_name = "Emma"
+    db_session.commit()
+
+    assert st.calendar_kind_name(db_session, familie) == ""
 
 
 def test_vorspann_upload_is_normalized_and_playable(setup_client, db_session):

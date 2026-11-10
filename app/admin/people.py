@@ -16,8 +16,9 @@ from app.admin.state import auftraege_for, auftrag_is_open, auftrag_slots, slot_
 from app.auth.dependencies import get_db, require_admin
 from app.mail.magic_link import send_invitation_mail
 from app.mail.reminder import send_reminder_mail
-from app.models import Auftrag, Beitrag, Person, Slot
+from app.models import Antwort, Auftrag, Beitrag, Person, Slot
 from app.settings import get_einstellungen, invitation_date, recording_deadline
+from app.storage import delete_quietly
 
 router = APIRouter(prefix="/admin")
 logger = logging.getLogger(__name__)
@@ -58,6 +59,8 @@ def _status(person: Person) -> list[str]:
         status.append(f"Erinnert am {_date(person.reminded_at)}")
     elif invited:
         status.append("Noch nicht erinnert")
+    if person.revoked_at:
+        status.append(f"Zugang widerrufen am {_date(person.revoked_at)}")
     return status
 
 
@@ -101,6 +104,74 @@ def _get_relative(db: Session, person_id: int) -> Person:
     if person is None or person.is_admin:
         raise HTTPException(status_code=404)
     return person
+
+
+def _send_reminder(request: Request, db: Session, person: Person, open_days: list[int]) -> bool:
+    try:
+        send_reminder_mail(
+            request.app.state.config,
+            session=db,
+            to_address=person.email,
+            display_name=person.display_name,
+            open_days=open_days,
+            login_url=login_url(request, person),
+            person_id=person.id,
+        )
+    except Exception as exc:
+        # R20: nur die Ausnahmeklasse, der Text traegt Adressen und Serverantworten.
+        logger.warning(
+            "Erinnerungs-Mail fehlgeschlagen: person=%s fehler=%s", person.id, type(exc).__name__
+        )
+        return False
+    person.reminded_at = berlin_now(request)
+    db.commit()
+    return True
+
+
+def _reminder_recipients(db: Session) -> list[tuple[Person, list[int]]]:
+    """Job 034: gewoehnliche Personen, nicht widerrufen, mit mindestens einem offenen Tuerchen."""
+    persons = (
+        db.execute(
+            select(Person)
+            .where(Person.is_admin.is_(False), Person.revoked_at.is_(None))
+            .order_by(Person.id)
+        )
+        .scalars()
+        .all()
+    )
+    recipients = []
+    for person in persons:
+        _, open_days = _open_days(db, person)
+        if open_days:
+            recipients.append((person, open_days))
+    return recipients
+
+
+@router.get("/personen/alle-erinnern", response_class=HTMLResponse)
+def alle_erinnern_bestaetigen(
+    request: Request, db: Session = Depends(get_db), _admin=Depends(require_admin)
+):
+    names = [p.display_name or p.email for p, _ in _reminder_recipients(db)]
+    return render(request, "admin/personen_alle_erinnern.html", {"names": names}, tab="personen")
+
+
+@router.post("/personen/alle-erinnern", response_class=HTMLResponse)
+def alle_erinnern(request: Request, db: Session = Depends(get_db), _admin=Depends(require_admin)):
+    recipients = _reminder_recipients(db)
+    if not recipients:
+        flash(request, "Niemand hat offene Türchen, keine Erinnerung verschickt.", "err")
+        return redirect("/admin/personen")
+    failed = [
+        person.display_name or person.email
+        for person, open_days in recipients
+        if not _send_reminder(request, db, person, open_days)
+    ]
+    text = f"Erinnerungen: {len(recipients) - len(failed)} verschickt, {len(failed)} fehlgeschlagen"
+    if failed:
+        flash(request, f"{text} ({_names(failed)}).", "err")
+    else:
+        flash(request, f"{text}.")
+    return redirect("/admin/personen")
 
 
 @router.get("/personen", response_class=HTMLResponse)
@@ -151,6 +222,7 @@ def personen(request: Request, db: Session = Depends(get_db), _admin=Depends(req
             "overdue": overdue,
             "invite_from": invite_from if invitations_due else None,
             "uninvited": _names(uninvited) if uninvited else None,
+            "remind_count": len(_reminder_recipients(db)),
         },
         tab="personen",
     )
@@ -165,32 +237,23 @@ def erinnern(
 ):
     person = _get_relative(db, person_id)
     name = person.display_name or person.email
+    if person.revoked_at:
+        flash(
+            request,
+            f"Zugang von {name} ist widerrufen, keine Erinnerung verschickt. "
+            "Erst „Widerruf aufheben“ drücken.",
+            "err",
+        )
+        return redirect("/admin/personen")
     _, open_days = _open_days(db, person)
     if not open_days:
         # AE20: ohne offene Tuerchen nicht ausloesbar, auch serverseitig.
         flash(request, f"{name} hat keine offenen Türchen, keine Erinnerung verschickt.", "err")
         return redirect("/admin/personen")
-    try:
-        send_reminder_mail(
-            request.app.state.config,
-            session=db,
-            to_address=person.email,
-            display_name=person.display_name,
-            open_days=open_days,
-            login_url=login_url(request, person),
-        )
-    except Exception as exc:
-        # R20: nur die Ausnahmeklasse, der Text traegt Adressen und Serverantworten.
-        logger.warning(
-            "Erinnerungs-Mail fehlgeschlagen: person=%s fehler=%s", person.id, type(exc).__name__
-        )
-        flash(request, f"Erinnerung an {name} konnte nicht verschickt werden.", "err")
-    else:
-        person.reminded_at = berlin_now(request)
-        # KTD8: eine neue Admin-Mail mit frischem Link hebt den Widerruf-Merker auf.
-        person.revoked_at = None
-        db.commit()
+    if _send_reminder(request, db, person, open_days):
         flash(request, f"Erinnerung an {name} verschickt.")
+    else:
+        flash(request, f"Erinnerung an {name} konnte nicht verschickt werden.", "err")
     return redirect("/admin/personen")
 
 
@@ -205,12 +268,21 @@ def einladen(
     # eine Einladungsmail bekam -- der erste erfolgreiche Versand zaehlt.
     person = _get_relative(db, person_id)
     name = person.display_name or person.email
+    if person.revoked_at:
+        flash(
+            request,
+            f"Zugang von {name} ist widerrufen, keine Einladung verschickt. "
+            "Erst „Widerruf aufheben“ drücken.",
+            "err",
+        )
+        return redirect("/admin/personen")
     try:
         send_invitation_mail(
             request.app.state.config,
             session=db,
             to_address=person.email,
             login_url=login_url(request, person),
+            person_id=person.id,
         )
     except Exception as exc:
         logger.warning(
@@ -220,7 +292,6 @@ def einladen(
     else:
         if person.invited_at is None:
             person.invited_at = berlin_now(request)
-        person.revoked_at = None
         db.commit()
         flash(request, f"Einladung an {name} verschickt.")
     return redirect("/admin/personen")
@@ -248,10 +319,25 @@ def widerrufen(
     # zugleich (app/auth/tokens.py, app/auth/dependencies.py).
     person = _get_relative(db, person_id)
     person.access_version += 1
-    # KTD8: Merker fuer die Morgen-Mails (U7), bis eine neue Admin-Mail ihn aufhebt.
+    # KTD8: Merker fuer Morgen- und Admin-Mails, bis "Widerruf aufheben" ihn leert.
     person.revoked_at = berlin_now(request)
     db.commit()
     flash(request, f"Zugang von {person.display_name or person.email} widerrufen.")
+    return redirect("/admin/personen")
+
+
+@router.post("/personen/{person_id}/widerruf-aufheben", response_class=HTMLResponse)
+def widerruf_aufheben(
+    person_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    # access_version bleibt: alte Links und Sitzungen bleiben ungueltig.
+    person = _get_relative(db, person_id)
+    person.revoked_at = None
+    db.commit()
+    flash(request, f"Widerruf von {person.display_name or person.email} aufgehoben.")
     return redirect("/admin/personen")
 
 
@@ -313,7 +399,13 @@ def loeschen(
     )
     einstellungen = get_einstellungen(db)
     einstellungen.hoechste_person_id = max(einstellungen.hoechste_person_id or 0, person.id)
+    antwort = db.execute(select(Antwort).where(Antwort.person_id == person.id)).scalar_one_or_none()
+    antwort_key = antwort.audio_object_key if antwort is not None else None
+    if antwort is not None:
+        db.delete(antwort)
     db.delete(person)
     db.commit()
+    if antwort_key is not None:
+        delete_quietly(request.app.state.storage, antwort_key)
     flash(request, f"{name} gelöscht.")
     return redirect("/admin/personen")

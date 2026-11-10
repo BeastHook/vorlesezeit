@@ -4,7 +4,7 @@
 # Beim ersten Öffnen fragt macOS nach: Systemeinstellungen, Datenschutz &
 # Sicherheit, „Trotzdem öffnen“.
 set -u
-VERSION="0.5.0"
+VERSION="0.6.0"
 IMAGE="ghcr.io/beasthook/vorlesezeit-installer:$VERSION"
 ORDNER="$HOME/Vorlesezeit"
 export PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:$HOME/.docker/bin:/Applications/Docker.app/Contents/Resources/bin"

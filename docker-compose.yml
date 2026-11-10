@@ -39,6 +39,8 @@ services:
       # das db-data-Volume unten.
       DATABASE_PATH: /data/vorlesezeit.db
       SESSION_SECRET_KEY: vorlesezeit-dev-session-secret
+      # Lokal laeuft die App ueber http://localhost, dort fehlte ein Secure-Cookie.
+      SESSION_COOKIE_INSECURE: "1"
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       MAGIC_LINK_VALID_UNTIL: "2026-12-31"
       SMTP_HOST: smtp-relay.brevo.com

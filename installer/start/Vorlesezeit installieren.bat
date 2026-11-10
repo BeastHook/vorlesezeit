@@ -12,7 +12,7 @@ if not defined VORLESEZEIT_CRLF (
   call "%TEMP%\vorlesezeit-installieren.bat"
   exit /b
 )
-set "VERSION=0.5.0"
+set "VERSION=0.6.0"
 set "IMAGE=ghcr.io/beasthook/vorlesezeit-installer:%VERSION%"
 set "ORDNER=%USERPROFILE%\Vorlesezeit"
 

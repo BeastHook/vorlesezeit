@@ -155,6 +155,7 @@ def test_reminder_goes_to_person_with_open_slot(
     assert "Erinnerung an Klaus verschickt." in response.text
     assert len(mails["reminder"]) == 1
     sent = mails["reminder"][0]
+    assert sent["person_id"] == klaus.id
     assert sent["to_address"] == "klaus@example.test"
     assert sent["open_days"] == [15]
     assert "/login/confirm?token=" in sent["login_url"]
@@ -198,7 +199,11 @@ def test_invite_sends_magic_link(admin_client: TestClient, db_session: Session, 
 
     assert "Einladung an Klaus verschickt." in response.text
     assert mails["invite"] == [
-        {"to_address": "klaus@example.test", "login_url": mails["invite"][0]["login_url"]}
+        {
+            "person_id": klaus.id,
+            "to_address": "klaus@example.test",
+            "login_url": mails["invite"][0]["login_url"],
+        }
     ]
     assert "/login/confirm?token=" in mails["invite"][0]["login_url"]
 
@@ -397,36 +402,165 @@ def test_revoke_sets_revoked_at_and_bumps_version(
     assert klaus.access_version == version + 1
 
 
-def test_invite_after_revoke_clears_revoked_at_even_if_invited(
-    admin_client: TestClient, db_session: Session, mails
-):
+# --- Widerruf schliessen (Job 033) ---------------------------------------------
+
+INVITE_REFUSED = (
+    "Zugang von Klaus ist widerrufen, keine Einladung verschickt. Erst „Widerruf aufheben“ drücken."
+)
+REMINDER_REFUSED = (
+    "Zugang von Klaus ist widerrufen, keine Erinnerung verschickt. "
+    "Erst „Widerruf aufheben“ drücken."
+)
+
+
+def test_invite_refused_while_revoked(admin_client: TestClient, db_session: Session, mails):
     klaus = _person(db_session, "klaus@example.test", "Klaus")
     klaus.invited_at = datetime(2026, 10, 4, 21, 5)
     db_session.commit()
     _revoked(admin_client, db_session, klaus)
+    revoked_at = db_session.get(Person, klaus.id).revoked_at
+
+    response = admin_client.post(f"/admin/personen/{klaus.id}/einladen")
+
+    assert response.status_code == 200
+    assert "flash err" in response.text
+    assert INVITE_REFUSED in response.text
+    assert mails["invite"] == []
+    db_session.expire_all()
+    klaus = db_session.get(Person, klaus.id)
+    assert klaus.revoked_at == revoked_at
+    assert klaus.invited_at == datetime(2026, 10, 4, 21, 5)
+
+
+def test_invite_refused_while_revoked_never_builds_a_link(
+    admin_client: TestClient, db_session: Session, mails, monkeypatch
+):
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    _revoked(admin_client, db_session, klaus)
+    built = []
+    monkeypatch.setattr(
+        "app.admin.people.login_url", lambda request, person, **kw: built.append(person.id)
+    )
 
     admin_client.post(f"/admin/personen/{klaus.id}/einladen")
+    admin_client.post(f"/admin/personen/{klaus.id}/erinnern")
 
+    assert built == []
+
+
+def test_reminder_refused_while_revoked(admin_client: TestClient, db_session: Session, mails):
+    campaign = _campaign(db_session)
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    _assign(db_session, campaign, klaus, 14)
+    _revoked(admin_client, db_session, klaus)
+    revoked_at = db_session.get(Person, klaus.id).revoked_at
+
+    response = admin_client.post(f"/admin/personen/{klaus.id}/erinnern")
+
+    assert response.status_code == 200
+    assert "flash err" in response.text
+    assert REMINDER_REFUSED in response.text
+    assert mails["reminder"] == []
+    db_session.expire_all()
+    klaus = db_session.get(Person, klaus.id)
+    assert klaus.revoked_at == revoked_at
+    assert klaus.reminded_at is None
+
+
+def test_lift_revocation_clears_revoked_at_and_keeps_version(
+    admin_client: TestClient, config: Config, db_session: Session
+):
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    old_token = create_magic_link_token(config, klaus)
+    _revoked(admin_client, db_session, klaus)
+    version = db_session.get(Person, klaus.id).access_version
+
+    response = admin_client.post(f"/admin/personen/{klaus.id}/widerruf-aufheben")
+
+    assert response.status_code == 200  # nach Redirect auf /admin/personen
+    assert "flash ok" in response.text
+    assert "Widerruf von Klaus aufgehoben." in response.text
     db_session.expire_all()
     klaus = db_session.get(Person, klaus.id)
     assert klaus.revoked_at is None
-    assert klaus.invited_at == datetime(2026, 10, 4, 21, 5)
-    assert len(mails["invite"]) == 1
+    assert klaus.access_version == version
+    # Der Link von vor dem Widerruf bleibt ungueltig.
+    fresh = TestClient(admin_client.app)
+    assert fresh.post("/login/confirm", data={"token": old_token}).status_code == 400
 
 
-def test_reminder_after_revoke_clears_revoked_at(
+def test_invite_and_reminder_work_again_after_lift(
     admin_client: TestClient, db_session: Session, mails
 ):
     campaign = _campaign(db_session)
     klaus = _person(db_session, "klaus@example.test", "Klaus")
     _assign(db_session, campaign, klaus, 14)
     _revoked(admin_client, db_session, klaus)
+    admin_client.post(f"/admin/personen/{klaus.id}/widerruf-aufheben")
 
-    admin_client.post(f"/admin/personen/{klaus.id}/erinnern")
+    invite = admin_client.post(f"/admin/personen/{klaus.id}/einladen")
+    reminder = admin_client.post(f"/admin/personen/{klaus.id}/erinnern")
 
+    assert "Einladung an Klaus verschickt." in invite.text
+    assert "Erinnerung an Klaus verschickt." in reminder.text
+    assert len(mails["invite"]) == 1
+    assert len(mails["reminder"]) == 1
     db_session.expire_all()
     assert db_session.get(Person, klaus.id).revoked_at is None
-    assert len(mails["reminder"]) == 1
+
+
+def test_lift_revocation_refused_for_admin(admin_client: TestClient, db_session: Session):
+    from sqlalchemy import select
+
+    admin = db_session.execute(select(Person).where(Person.is_admin.is_(True))).scalar_one()
+
+    response = admin_client.post(
+        f"/admin/personen/{admin.id}/widerruf-aufheben", follow_redirects=False
+    )
+
+    assert response.status_code == 404
+
+
+def test_lift_revocation_forbidden_for_non_admin(person_client: TestClient, db_session: Session):
+    other = _person(db_session, "a@example.test", "A")
+
+    response = person_client.post(
+        f"/admin/personen/{other.id}/widerruf-aufheben", follow_redirects=False
+    )
+
+    assert response.status_code == 403
+
+
+def test_row_shows_lift_button_only_while_revoked(
+    admin_client: TestClient, db_session: Session, monkeypatch
+):
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+    ben = _person(db_session, "ben@example.test", "Ben")
+    _freeze_today(monkeypatch, 2026, 11, 3)
+    _revoked(admin_client, db_session, klaus)
+
+    html = admin_client.get("/admin/personen").text
+
+    klaus_row = _row(html, "Klaus")
+    assert f'action="/admin/personen/{klaus.id}/widerruf-aufheben"' in klaus_row
+    assert "Widerruf aufheben" in klaus_row
+    assert f'href="/admin/personen/{klaus.id}/widerrufen"' not in klaus_row
+    assert '<span class="person-status-part">Zugang widerrufen am 3. Nov.</span>' in klaus_row
+    ben_row = _row(html, "Ben")
+    assert "widerruf-aufheben" not in ben_row
+    assert f'href="/admin/personen/{ben.id}/widerrufen"' in ben_row
+    assert "Zugang widerrufen am" not in ben_row
+
+
+def test_revoke_confirmation_names_lift_button(admin_client: TestClient, db_session: Session):
+    klaus = _person(db_session, "klaus@example.test", "Klaus")
+
+    response = admin_client.get(f"/admin/personen/{klaus.id}/widerrufen")
+
+    assert (
+        "Einladung und Erinnerung gehen erst wieder, wenn du „Widerruf aufheben“ drückst."
+        in response.text
+    )
 
 
 def test_failed_mails_after_revoke_keep_revoked_at(

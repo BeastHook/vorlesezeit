@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import settings
-from app.admin.setup import attach_beitrag
+from app.admin.setup import attach_beitrag, detach_other_beitraege
 from app.archive.visibility import FALLBACK_TITLE, web_title
 from app.auth.dependencies import family_auftrag, get_current_person, get_db
 from app.mail.magic_link import german_date
@@ -64,7 +64,13 @@ def _lock_for(person_id: int, auftrag_id: int | None) -> threading.Lock:
 def _render(request: Request, db: Session, name: str, context: dict) -> HTMLResponse:
     """Familienseiten nennen den Admin beim Anzeigenamen (R26) und das Kind."""
     return templates.TemplateResponse(
-        request, name, {"admin": admin_names(db), "kind": settings.kind_name(db), **context}
+        request,
+        name,
+        {
+            "admin": admin_names(db),
+            "kind": settings.person_kind_name(db, context["person"].id),
+            **context,
+        },
     )
 
 
@@ -79,9 +85,17 @@ def _existing_beitrag(db: Session, *, auftrag_id: int, person_id: int) -> Beitra
     ).scalar_one_or_none()
 
 
-def _is_approved(db: Session, *, auftrag_id: int, person_id: int) -> bool:
-    existing = _existing_beitrag(db, auftrag_id=auftrag_id, person_id=person_id)
-    return existing is not None and existing.approved_at is not None
+def _is_approved(db: Session, *, auftrag_id: int) -> bool:
+    # Irgendein freigegebener Beitrag des Auftrags sperrt (R10); frisch
+    # gelesen, damit auch die Pruefung unter dem Lock eine neue Freigabe sieht.
+    return (
+        db.execute(
+            select(Beitrag.id)
+            .where(Beitrag.auftrag_id == auftrag_id, Beitrag.approved_at.is_not(None))
+            .execution_options(populate_existing=True)
+        ).first()
+        is not None
+    )
 
 
 def _already_approved_response() -> JSONResponse:
@@ -126,7 +140,7 @@ def _handle_submission(
             status_code=413,
         )
 
-    if auftrag is not None and _is_approved(db, auftrag_id=auftrag.id, person_id=person.id):
+    if auftrag is not None and _is_approved(db, auftrag_id=auftrag.id):
         return _already_approved_response()
 
     try:
@@ -160,7 +174,7 @@ def _handle_submission(
         existing = (
             _existing_beitrag(db, auftrag_id=auftrag.id, person_id=person.id) if auftrag else None
         )
-        if existing is not None and existing.approved_at is not None:
+        if auftrag is not None and _is_approved(db, auftrag_id=auftrag.id):
             # R10: nach der Freigabe nicht mehr ersetzbar. Zweite Pruefung
             # unter dem Lock, falls der Admin waehrend der Normalisierung
             # freigegeben hat -- die frisch abgelegte Datei wird verworfen.
@@ -176,7 +190,9 @@ def _handle_submission(
             existing.rejected_at = None
             existing.withdrawn_at = None
             beitrag = existing
+            detach_other_beitraege(db, auftrag, keep=existing)
         elif auftrag is not None:
+            detach_other_beitraege(db, auftrag)
             # Derselbe Dienst wie der Admin-Upload: gilt an jedem Kalendertag
             # des Auftrags (R8).
             beitrag = attach_beitrag(db, auftrag, person_id=person.id, audio_object_key=key)

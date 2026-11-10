@@ -575,10 +575,14 @@ def test_upload_is_normalized_and_not_approved_r15(admin_client: TestClient, db_
     assert stored[:3] == b"ID3" or stored[0] == 0xFF
 
 
-def test_upload_refused_when_slot_has_active_beitrag(admin_client: TestClient, db_session: Session):
+def test_upload_refused_when_slot_has_approved_beitrag(
+    admin_client: TestClient, db_session: Session
+):
+    """Job 035: nur ein freigegebener Beitrag verweigert den Upload (R10);
+    einen nicht freigegebenen loest der Upload ab."""
     _, person = _setup(db_session)
     slot = _slot(db_session, 9)
-    _beitrag(admin_client, db_session, person, slot)
+    _beitrag(admin_client, db_session, person, slot, approved_at=_now())
 
     page = admin_client.post(
         "/admin/aufnahmen/upload",

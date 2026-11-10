@@ -222,6 +222,18 @@ def detach_beitraege(session: Session, auftrag: Auftrag) -> list[Beitrag]:
     return detached
 
 
+def detach_other_beitraege(
+    session: Session, auftrag: Auftrag, keep: Beitrag | None = None
+) -> list[Beitrag]:
+    """Eine neuere Aufnahme loest die nicht freigegebenen anderen Beitraege des
+    Auftrags (auch abgelehnte); ihre Dateien bleiben liegen."""
+    detached = [b for b in auftrag.beitraege if b is not keep and b.approved_at is None]
+    for beitrag in detached:
+        auftrag.beitraege.remove(beitrag)
+        beitrag.detached_at = _utcnow()
+    return detached
+
+
 def reassign_auftrag(
     session: Session,
     auftrag_id: int,

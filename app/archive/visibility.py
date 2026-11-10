@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.admin.state import ADVENT_YEAR, auftrag_slots
-from app.models import Auftrag, Beitrag, Person, Slot
+from app.models import Antwort, Auftrag, Beitrag, Person, Slot
 from app.recording.routing import AdminNames, admin_names
 
 # R10: ohne Titel kein Rueckfall auf eine Tuerchennummer.
@@ -95,6 +95,7 @@ class Archive:
     family: list[ArchiveEntry]
     locked_day: int | None  # heutiger Tag, falls fuer ihn schon etwas bereitliegt
     first_opening: bool  # noch keine fremde Geschichte offen
+    antwort: Antwort | None = None  # Antwort vom Kind an die angemeldete Person
 
 
 def _own_entry(beitrag: Beitrag, person: Person, admin: AdminNames) -> ArchiveEntry:
@@ -175,4 +176,7 @@ def build_archive(db: Session, person: Person, today: date) -> Archive:
         ],
         locked_day=locked_day,
         first_opening=open_until == 0,
+        antwort=None
+        if person.is_admin
+        else db.execute(select(Antwort).where(Antwort.person_id == person.id)).scalar_one_or_none(),
     )

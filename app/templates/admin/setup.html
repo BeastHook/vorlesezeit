@@ -43,8 +43,8 @@
     <div class="panel{% if not k.tonies %} muted{% endif %}">
       <form class="kal-teil" method="post" action="/admin/setup/kalender/{{ c.id }}">
         <div class="field"><label for="k{{ c.id }}">Name</label><input class="input" id="k{{ c.id }}" name="name" value="{{ c.name or '' }}" required></div>
-        <div class="field"><label for="kk{{ c.id }}">Für wen ist der Kalender?</label><input class="input" id="kk{{ c.id }}" name="kind_name" value="{{ c.kind_name or '' }}" placeholder="{{ kind_name or 'Emma' }}"></div>
-        <p class="meta">Steht in der Begrüßung im Vorlesetext und in den Morgen-Mails. {% if kind_name %}Leer lassen, dann gilt „{{ kind_name }}“ aus „Namen“.{% else %}Leer lassen, dann gilt der Name aus „Namen“.{% endif %}</p>
+        <div class="field"><label for="kk{{ c.id }}">Für wen ist der Kalender?</label><input class="input" id="kk{{ c.id }}" name="kind_name" value="{{ c.kind_name or '' }}" placeholder="Emma" required></div>
+        <p class="meta">Steht in der Begrüßung im Vorlesetext, in den Morgen-Mails, in Einladung und Erinnerung und auf den Seiten der Familie. Für mehrere Kinder einfach „Emma und Paul“.</p>
         <div class="cal-chips">
           {% for t in k.tonies %}<span class="cal-chip">{{ t.name or short_id(t.tonie_id) }}</span>{% else %}<span class="tag tag-outline">kein Tonie</span>{% endfor %}
         </div>
@@ -96,6 +96,7 @@
     <form class="panel" method="post" action="/admin/setup/kalender">
       <div class="panel-kicker">Neuer Kalender</div>
       <div class="field"><label for="k-neu">Name</label><input class="input" id="k-neu" name="name" placeholder="z. B. Familie Berger" required></div>
+      <div class="field"><label for="kk-neu">Für wen ist der Kalender?</label><input class="input" id="kk-neu" name="kind_name" placeholder="Emma" required></div>
       <button type="submit" class="btn btn-secondary btn-inline">Anlegen</button>
     </form>
   </div>
@@ -233,8 +234,6 @@
     {% if name_hinweise.umgebung or name_hinweise.abweichend %}<div class="field-state">{{ herkunft(name_hinweise) }}</div>{% endif %}
     <div class="field"><label for="n1">So nennt dich die Familie</label><input class="input" id="n1" name="admin_display_name" value="{{ display_name }}"></div>
     <p class="meta">Steht in Mails und auf den Seiten der Familie statt „Admin“, z. B. „liegt jetzt bei {{ display_name or "Luca" }} zur Freigabe“.</p>
-    <div class="field"><label for="n2">Für wen ist der Kalender?</label><input class="input" id="n2" name="kind_name" value="{{ kind_name }}"></div>
-    <p class="meta">Steht in der Einladung, der Erinnerung und auf den Seiten der Familie, z. B. „Ein Adventskalender für {{ kind_name or "Emma" }}“. Für mehrere Kinder einfach „Emma und Paul“. Begrüßung und Morgen-Mails nehmen zuerst den Namen beim Kalender oben, dieser gilt nur, wo dort nichts steht.</p>
     <button type="submit" class="btn btn-secondary btn-inline">Speichern</button>
   </form>
 </section>

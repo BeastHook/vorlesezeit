@@ -19,6 +19,20 @@
   </li>
 {% endmacro %}
 
+{% if archive.antwort %}
+<section class="section">
+  <h3>Antwort für dich</h3>
+  <ul class="row-list">
+    <li class="row-item">
+      <div class="row-head">
+        <div><div class="row-title">{{ antwort_title }}</div><div class="row-sub">{{ antwort_date }}</div></div>
+      </div>
+      <audio controls preload="none" src="/archiv/antwort"></audio>
+    </li>
+  </ul>
+</section>
+{% endif %}
+
 {% if archive.own %}
 <section class="section">
   <h3>Deine Aufnahmen</h3>
@@ -42,6 +56,9 @@
     {% endif %}
     {% for e in archive.family %}{{ entry(e) }}{% endfor %}
   </ul>
+  {% if archive.family %}
+  <a class="btn btn-secondary btn-block" href="/archiv/download" download data-role="jahresrueckblick">Alle Geschichten herunterladen</a>
+  {% endif %}
   {% elif archive.first_opening %}
   <p class="empty">Noch ist nichts offen. Die erste Geschichte öffnet sich am 2. Dezember.</p>
   {% else %}

@@ -40,7 +40,7 @@ from app.config import (
     check_delivery_time,
 )
 from app.crypto import CredentialsUnavailable, decrypt, encrypt, fingerprint, key_usable
-from app.models import Campaign, CreativeTonie, Einstellungen, TonieKonto
+from app.models import Auftrag, Campaign, CreativeTonie, Einstellungen, Slot, TonieKonto
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,6 @@ _SIMPLE_FELDER = (
     "invitation_date",
     "magic_link_valid_until",
     "admin_display_name",
-    "kind_name",
 )
 
 
@@ -316,13 +315,36 @@ def admin_display_name(session: Session) -> str | None:
     return get_einstellungen(session).admin_display_name
 
 
-def kind_name(session: Session) -> str | None:
-    return get_einstellungen(session).kind_name
-
-
 def calendar_kind_name(session: Session, campaign: Campaign) -> str:
-    """Advent-Anreicherung KTD8: der Kindername des Kalenders, sonst der instanzweite."""
-    return (campaign.kind_name or "").strip() or (kind_name(session) or "").strip()
+    """Der Kindername des Kalenders; ohne Eintrag leer."""
+    return (campaign.kind_name or "").strip()
+
+
+def join_names(names: list[str]) -> str:
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " und " + names[-1]
+
+
+def person_kind_name(session: Session, person_id: int) -> str | None:
+    """Die Kindernamen der Kalender der Person, sonst aller Kalender, nach Kalender-ID,
+    ohne leere und doppelte Namen; None, wenn keiner bleibt."""
+    query = select(Campaign).order_by(Campaign.id)
+    ids = set(
+        session.execute(
+            select(Slot.campaign_id)
+            .join(Auftrag, Slot.auftrag_id == Auftrag.id)
+            .where(Auftrag.person_id == person_id)
+        ).scalars()
+    )
+    if ids:
+        query = query.where(Campaign.id.in_(ids))
+    names: list[str] = []
+    for campaign in session.execute(query).scalars():
+        name = calendar_kind_name(session, campaign)
+        if name and name not in names:
+            names.append(name)
+    return join_names(names) or None
 
 
 def smtp_zugang(session: Session, key: str | None) -> SmtpZugang | None:

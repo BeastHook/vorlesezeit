@@ -110,8 +110,8 @@ hat ihre eigene Anmeldung per Magic Link.
 ### 3. Einstellungen der Domain
 
 1. **SSL/TLS → Edge Certificates**: **Always Use HTTPS** an. Damit geht nie
-   eine Sitzung über unverschlüsseltes HTTP (das Sitzungs-Cookie trägt noch
-   kein Secure-Flag).
+   eine Sitzung über unverschlüsseltes HTTP (das Sitzungs-Cookie trägt das
+   Secure-Flag).
 2. **Security → Bots**: **Bot Fight Mode aus**. Im Free-Plan gilt der
    Schalter für die ganze Domain; eingeschaltet prallt cron-job.org an einer
    Challenge ab, und die Wache meldet Fehlalarme.
@@ -148,6 +148,9 @@ Eine eigene Datei `.env.heimserver` im Repository-Verzeichnis auf dem Gerät,
 nie committen (die Namen stehen in `.env.example`). Fehlt ein Pflichtwert,
 bricht `docker compose` mit einer Meldung wie
 `required variable SESSION_SECRET_KEY is missing a value` ab.
+
+`SESSION_COOKIE_INSECURE` ist nur für den lokalen Dev-Stack und nie auf dem
+Heimserver gesetzt.
 
 | Variable | Pflicht | Inhalt |
 |---|---|---|
@@ -240,11 +243,12 @@ man über den Einrichtungslink oben ins Setup.
 
 ## Reiter Setup
 
-Im Admin-Bereich pflegt der Reiter **Setup**: Kalender (anlegen, umbenennen),
+Im Admin-Bereich pflegt der Reiter **Setup**: Kalender (anlegen, umbenennen, Kindername),
 tonies-Konten mit ihren Creative Tonies und deren Zuordnung zu Kalendern,
 SMTP-Zugang und Absender, Lieferzeit, Aufnahmefrist, Einladungstermin,
-Gültigkeit der Anmeldelinks und den Anzeigenamen des Admins. Jede Änderung
-gilt ohne Neustart. Zugangsdaten werden vor dem Speichern mit einer
+Gültigkeit der Anmeldelinks und den Anzeigenamen des Admins. Der Kindername
+ist je Kalender Pflicht und gilt überall (Begrüßung, Morgen-Mails, Einladung,
+Erinnerung, Seiten der Familie). Jede Änderung gilt ohne Neustart. Zugangsdaten werden vor dem Speichern mit einer
 Test-Anmeldung geprüft. Eine geänderte Lieferzeit gilt bei schon offenem
 Zeitfenster erst ab dem nächsten Abend. Oben im Reiter steht eine ruhige Zeile
 „Version <Nummer>". Nur wenn auf GitHub eine neuere Version liegt, steht dahinter
@@ -298,6 +302,16 @@ läuft in eigenem Prozess und teilt die Sperre je Tonie nicht mit der App.
 Für den Rahmenbeweis bekommt der Generalprobe-Kalender im Setup einen Abspann,
 der Vorspann ist die Melodie.
 
+Nachholen eines verpassten Tages (Job 040) prüft eine eigene, kurze Probe,
+ebenfalls auf einem eigenen, leeren Kalender (nicht dem der 24-Tage-Probe):
+`fill-nachholen --tonie-index N` legt die Tage 5 bis 7 und einen Ersatzbeitrag
+an, Tag 5 noch ohne Freigabe. `nachholen --tonie-index N` sichert die
+Kapitelliste, lässt Tag 5 mit Ersatzbeitrag laufen, gibt die Geschichte von
+Tag 5 danach frei und prüft live: nach Tag 6 stehen „Tag 6“, „Tag 5“ und der
+Bestand auf dem Tonie, nach Tag 7 nur „Tag 7“ und der Bestand. Danach spielt es
+die gesicherte Liste zurück; das Protokoll liegt im App-Container unter
+`.remember/logs/nachholen-<zeit>.md`. Gleiche Zeitregel wie bei `run`.
+
 ## Starten, stoppen, aktualisieren
 
 Kurzform: `DC="docker compose -f docker-compose.heimserver.yml --env-file .env.heimserver"`
@@ -345,7 +359,7 @@ Altwerte, neue Spalten, einen harmlosen zweiten Start und `integrity_check` und
 endet nur bei bestandener Probe mit Exit-Code 0. Zuletzt listet es die Personen,
 die die Migration als widerrufen markiert (ID und Anzeigename). Der Admin
 bestätigt diese Liste vor der Bereitstellung und hebt den Merker für wieder
-eingeladene Personen auf.
+eingeladene Personen mit dem Knopf „Widerruf aufheben“ im Reiter Personen auf.
 
 **Umstellung auf die Mehrkalender-Version** (einmalig): vor dem ersten Start
 der neuen Version eine Sicherung auslösen (`$DC exec backup python
@@ -427,7 +441,7 @@ den Einladungscode und eine Startdatei aus `installer/start/`:
 
 Einzeiler für Linux und NAS:
 
-    curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v0.5.0/installer/start/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/BeastHook/vorlesezeit/v0.6.0/installer/start/install.sh | sh
 
 Die Startdatei prüft Docker (fehlt es, öffnet sie die Downloadseite; läuft es
 nicht, startet sie es und wartet bis zu 2 Minuten), unter Windows auch WSL2.
@@ -607,6 +621,7 @@ Zwei Aufträge, beide mit Zeitzone `Europe/Berlin`.
 | cron-job.org „wieder erreichbar“ | Wiederherstellung | nichts, außer ein Abend blieb ohne Lauf: Reiter „Auslieferung“ prüfen. |
 | cron-job.org „Auftrag deaktiviert“ | 25 Fehlschläge in Folge | Ursache beheben, dann wieder einschalten (unten). |
 | Abendmeldung der App mit „Ohne Rahmen ausgeliefert“ | Die Geschichte ist auf dem Tonie, aber ohne Vorspann und Abspann | Rahmen des Kalenders im Setup anhören, ersetzen oder entfernen, sonst den Haken „Rahmen in diesem Advent aus“ setzen. |
+| Abendmeldung der App mit „Türchen N nachgeholt“ oder „Türchen N nicht nachgeholt“ | Am Tag N sprang der Ersatzbeitrag ein, die echte Geschichte wurde danach freigegeben. „Nachgeholt“: sie steht als zweites Kapitel hinter der Tagesgeschichte und wird am nächsten Tag wie jedes App-Kapitel abgeräumt. „Nicht nachgeholt“: sie ließ sich nicht laden, es fehlte Platz für beide oder die Toniecloud hat das Paar abgelehnt; die Tagesgeschichte ist trotzdem auf dem Tonie | Bei „nicht nachgeholt“ im Reiter „Auslieferung“ den manuellen Lauf mit der Geschichte von Tag N starten, sofern sie noch gehört werden soll. |
 | Abendmeldung der App mit Fehlschlag oder Ersatzbeitrag (eine Sammelmeldung je Abend über alle Tonies; ein Fehlschlag kommt zusätzlich sofort als Einzelmeldung mit der Zeile „Tonie: ••••XXXX“) | Lauf lief, aber nicht wie geplant | Mit dem Tonie-Umschalter den genannten Tonie wählen, dann Reiter „Auslieferung“ und „Aufnahmen“. |
 
 Fällt der Mailanbieter aus (Drosselung, Sperre der Absender-IP), fehlen

@@ -9,7 +9,10 @@ nach R10).
 
 from __future__ import annotations
 
+import io
+import itertools
 import uuid
+import zipfile
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
@@ -662,3 +665,195 @@ def test_beitrag_without_stored_file_is_404(
 
     assert ruth_client.get(f"/archiv/{no_key.id}/audio", follow_redirects=False).status_code == 404
     assert ruth_client.get(f"/archiv/{gone.id}/audio", follow_redirects=False).status_code == 404
+
+
+# --- Jahresrueckblick: alle sichtbaren Geschichten als ZIP (Job 037) --------
+
+ZIP_NAME = "Vorlesezeit-Geschichten-2026.zip"
+
+
+def _zip(response) -> zipfile.ZipFile:
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert response.headers["content-disposition"] == f'attachment; filename="{ZIP_NAME}"'
+    return zipfile.ZipFile(io.BytesIO(response.content))
+
+
+def test_jahresrueckblick_contains_open_family_stories_sorted_by_day_and_title(
+    client: TestClient, config: Config, db_session: Session, family, monkeypatch
+):
+    ruth, miri = family
+    oma = create_person(db_session, email="oma@example.test", display_name="Oma")
+    _calendar(db_session, "Patenkinder")
+    _auftrag_at(db_session, ruth, _slot(db_session, 20, "Patenkinder"))
+    _beitrag(
+        client, db_session, miri, _slot(db_session, 7), title="Zimtsterne", approved_at=_utcnow()
+    )
+    _beitrag(
+        client,
+        db_session,
+        oma,
+        _slot(db_session, 7, "Patenkinder"),
+        title="Apfel: Duft",
+        approved_at=_utcnow(),
+    )
+    _beitrag(
+        client, db_session, oma, _slot(db_session, 3), title="Der Schneemann", approved_at=_utcnow()
+    )
+    # Tag 9 oeffnet sich erst am 10.12.; Ruths eigene Geschichte gehoert nicht dazu.
+    _beitrag(client, db_session, miri, _slot(db_session, 9), title="Noch zu", approved_at=_utcnow())
+    _beitrag(client, db_session, ruth, _slot(db_session, 17), title="Meine", approved_at=_utcnow())
+    _freeze(monkeypatch, _at(12, 9))
+
+    archive = _zip(_login(client, config, ruth).get("/archiv/download"))
+
+    assert archive.namelist() == [
+        "Tag 03 - Der Schneemann - Oma.mp3",
+        "Tag 07 - Apfel Duft - Oma.mp3",
+        "Tag 07 - Zimtsterne - Miri.mp3",
+    ]
+
+
+def test_jahresrueckblick_files_equal_archive_playback_without_trim(
+    client: TestClient, config: Config, db_session: Session, family, monkeypatch
+):
+    ruth, miri = family
+    story = _beitrag(
+        client,
+        db_session,
+        miri,
+        _slot(db_session, 5),
+        title="Roh",
+        chapter_title="Sterne zählen",
+        cut_start_seconds=0.2,
+        cut_end_seconds=0.8,
+        approved_at=_utcnow(),
+    )
+    _freeze(monkeypatch, _at(12, 6))
+    ruth_client = _login(client, config, ruth)
+
+    archive = _zip(ruth_client.get("/archiv/download"))
+
+    name = "Tag 05 - Sterne zählen - Miri.mp3"
+    assert archive.namelist() == [name]
+    assert archive.getinfo(name).compress_type == zipfile.ZIP_STORED
+    stored = client.app.state.storage.get(story.audio_object_key)
+    assert archive.read(name) == stored
+    assert archive.read(name) == ruth_client.get(f"/archiv/{story.id}/audio").content
+
+
+def test_jahresrueckblick_and_archive_list_agree_for_every_state(
+    client: TestClient, config: Config, db_session: Session, family, monkeypatch
+):
+    ruth, miri = family
+    _calendar(db_session, "Patenkinder")  # Ruth hat dort keinen Auftrag
+    next_day = {"Familie": 1, "Patenkinder": 1}
+    beitraege = []
+    for n, (approved, rejected, detached, in_slot, member) in enumerate(
+        itertools.product((True, False), repeat=5), start=1
+    ):
+        slot = None
+        if in_slot:
+            calendar = "Familie" if member else "Patenkinder"
+            slot = _slot(db_session, next_day[calendar], calendar)
+            next_day[calendar] += 1
+        beitraege.append(
+            _beitrag(
+                client,
+                db_session,
+                miri,
+                slot,
+                title=f"Fall {n:02d}",
+                approved_at=_utcnow() if approved else None,
+                rejected_at=_utcnow() if rejected else None,
+                detached_at=_utcnow() if detached else None,
+            )
+        )
+    _freeze(monkeypatch, _at(12, 9))
+    ruth_client = _login(client, config, ruth)
+
+    page = ruth_client.get("/archiv").text
+    names = " ".join(_zip(ruth_client.get("/archiv/download")).namelist())
+
+    listed = [b.title for b in beitraege if b.title in page]
+    zipped = [b.title for b in beitraege if b.title in names]
+    assert zipped == listed
+    assert len(zipped) == 1
+
+
+def test_jahresrueckblick_same_names_get_id_suffix(
+    client: TestClient, config: Config, db_session: Session, family, monkeypatch
+):
+    ruth, miri = family
+    _calendar(db_session, "Patenkinder")
+    _auftrag_at(db_session, ruth, _slot(db_session, 20, "Patenkinder"))
+    a = _beitrag(
+        client, db_session, miri, _slot(db_session, 4), title="Hallo", approved_at=_utcnow()
+    )
+    b = _beitrag(
+        client,
+        db_session,
+        miri,
+        _slot(db_session, 4, "Patenkinder"),
+        title="Hallo",
+        approved_at=_utcnow(),
+    )
+    _freeze(monkeypatch, _at(12, 5))
+
+    names = _zip(_login(client, config, ruth).get("/archiv/download")).namelist()
+
+    assert names == [f"Tag 04 - Hallo - Miri - {a.id}.mp3", f"Tag 04 - Hallo - Miri - {b.id}.mp3"]
+
+
+def test_jahresrueckblick_speaker_without_name_has_no_name_part(
+    client: TestClient, config: Config, db_session: Session, family, monkeypatch
+):
+    ruth, _ = family
+    anonym = create_person(db_session, email="anonym@example.test")
+    _beitrag(client, db_session, anonym, _slot(db_session, 2), title="Leise", approved_at=_utcnow())
+    _freeze(monkeypatch, _at(12, 3))
+
+    names = _zip(_login(client, config, ruth).get("/archiv/download")).namelist()
+
+    assert names == ["Tag 02 - Leise.mp3"]
+
+
+def test_jahresrueckblick_missing_file_listed_in_fehlt(
+    client: TestClient, config: Config, db_session: Session, family, monkeypatch
+):
+    ruth, miri = family
+    gone = _beitrag(
+        client, db_session, miri, _slot(db_session, 5), title="Weg", approved_at=_utcnow()
+    )
+    client.app.state.storage.delete(gone.audio_object_key)
+    _freeze(monkeypatch, _at(12, 6))
+
+    archive = _zip(_login(client, config, ruth).get("/archiv/download"))
+
+    assert archive.namelist() == ["FEHLT.txt"]
+    text = archive.read("FEHLT.txt").decode("utf-8")
+    assert text == "Diese Geschichten ließen sich nicht laden:\nTag 05 - Weg - Miri.mp3\n"
+
+
+def test_jahresrueckblick_requires_login(client: TestClient):
+    response = client.get("/archiv/download", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/login")
+
+
+def test_archive_offers_jahresrueckblick_only_with_family_stories(
+    client: TestClient, config: Config, db_session: Session, family, monkeypatch
+):
+    ruth, miri = family
+    _beitrag(client, db_session, miri, _slot(db_session, 5), title="Sterne", approved_at=_utcnow())
+    ruth_client = _login(client, config, ruth)
+
+    _freeze(monkeypatch, _at(12, 5, 23, 59))
+    assert 'href="/archiv/download"' not in ruth_client.get("/archiv").text
+    assert _zip(ruth_client.get("/archiv/download")).namelist() == []
+
+    _freeze(monkeypatch, _at(12, 6, 0, 0))
+    page = ruth_client.get("/archiv").text
+    assert 'href="/archiv/download"' in page
+    assert 'data-role="jahresrueckblick"' in page
+    assert "Alle Geschichten herunterladen" in page

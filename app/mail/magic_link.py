@@ -126,14 +126,14 @@ def build_invitation_message(
 
 
 def send_invitation_mail(
-    config: Config, *, session: Session, to_address: str, login_url: str
+    config: Config, *, session: Session, to_address: str, login_url: str, person_id: int
 ) -> None:
     message = build_invitation_message(
         to_address=to_address,
         login_url=login_url,
         valid_until=settings.magic_link_valid_until(session),
         recording_deadline=settings.recording_deadline(session),
-        kind_name=settings.kind_name(session),
+        kind_name=settings.person_kind_name(session, person_id),
         sender_name=settings.admin_display_name(session),
     )
     send_message(config, session, message)

@@ -2,7 +2,7 @@
 {% from "_advent.html" import siegel %}
 {% block title %}Aufnahmen{% endblock %}
 {% macro rec_row(row) %}
-<a class="rec-row{% if detail and detail.beitrag.id == row.beitrag.id %} sel{% endif %}" href="/admin/aufnahmen?beitrag_id={{ row.beitrag.id }}">{{ rec_check(row.beitrag) }}<div><div class="n">{{ row.name }}</div><div class="meta">{{ row.meta }}{% if row.title_open %} · <strong>Kapitelname offen</strong>{% endif %}</div>{{ chips(row.chips) }}</div><span class="{{ row.tag_class }}">{{ row.tag_label }}</span></a>
+<a class="rec-row{% if detail and detail.beitrag.id == row.beitrag.id %} sel{% endif %}" href="/admin/aufnahmen?beitrag_id={{ row.beitrag.id }}">{{ rec_check(row.beitrag) }}<div><div class="n">{{ row.name }}</div><div class="meta">{{ row.meta }}{% if row.title_open %} · <strong>Kapitelname offen</strong>{% endif %}{% if row.two_active %} · <strong>zwei aktive Beiträge</strong>{% endif %}</div>{{ chips(row.chips) }}</div><span class="{{ row.tag_class }}">{{ row.tag_label }}</span></a>
 {% endmacro %}
 {% macro rec_check(b) %}<input class="rec-check" type="checkbox" form="dl-form" name="ids" value="{{ b.id }}" tabindex="-1" aria-label="Zum Herunterladen auswählen">{% endmacro %}
 {% macro chips(items, mark=False) %}{% if items %}<div class="cal-chips">{% for c in items %}<span class="cal-chip{% if c.done %} done{% endif %}">{{ c.label }}{% if mark and c.done %} · ausgeliefert{% endif %}</span>{% endfor %}</div>{% endif %}{% endmacro %}
@@ -23,13 +23,13 @@
       {% for row in day_rows %}{{ rec_row(row) }}{% else %}<p class="meta">Noch keine Aufnahmen.</p>{% endfor %}
     </div>
     <h3 style="margin-top:var(--space-6)">Eingang ohne Türchen</h3>
-    <p class="meta">Freie Nachrichten werden nie automatisch aufgespielt (R20).</p>
+    <p class="meta">Freie Nachrichten werden nie automatisch aufgespielt.</p>
     <div class="rec-list">
       {% for row in free_rows %}{{ rec_row(row) }}{% else %}<p class="meta">Keine freien Nachrichten.</p>{% endfor %}
     </div>
     {% if detached_beitraege %}
     <h3 class="section">Vom Türchen gelöst</h3>
-    <p class="meta">Nach einer Neuvergabe vom Türchen gelöst (R35). Sie werden nie ausgeliefert und bleiben im Archiv der Person, bis du sie löschst.</p>
+    <p class="meta">Nach einer Neuvergabe oder einer neueren Aufnahme vom Türchen gelöst. Sie werden nie ausgeliefert und bleiben im Archiv der Person, bis du sie löschst.</p>
     <div class="rec-list">
       {% for b in detached_beitraege %}
       <div class="rec-row">{{ rec_check(b) }}<div><div class="n">{{ b.title or "Aufnahme ohne Titel" }}</div><div class="meta">gelöst · {{ b.person.display_name or b.person.email }}</div></div><a class="btn btn-danger push-right" href="/admin/aufnahmen/{{ b.id }}/loeschen">Löschen …</a></div>
@@ -37,7 +37,7 @@
     </div>
     {% endif %}
     <form class="panel" style="margin-top:var(--space-6)" method="post" action="/admin/aufnahmen/upload" enctype="multipart/form-data">
-      <div class="panel-kicker">Einspringen (R15)</div>
+      <div class="panel-kicker">Einspringen</div>
       <div class="panel-title">Audiodatei in ein Türchen legen</div>
       {% if upload_slots %}
       <div class="field"><label for="upload-slot">Kalendertag</label><select class="input" id="upload-slot" name="slot_id">
@@ -46,9 +46,110 @@
       <label class="drop">Datei wählen (mp3, m4a, wav, ogg …)<br><input type="file" name="file" accept="audio/*" required><br><span class="meta">Wird normalisiert wie eine Aufnahme und muss danach freigegeben werden.</span></label>
       <button type="submit" class="btn btn-secondary btn-inline" data-busy="Lädt hoch …" data-done="Hochgeladen ✓">Hochladen</button>
       {% else %}
-      <p class="meta">Alle Türchen haben schon eine Aufnahme.</p>
+      <p class="meta">Alle Türchen haben schon eine freigegebene Aufnahme.</p>
       {% endif %}
     </form>
+    <div class="panel"{% if vorlesende %} id="recorder-app" data-submit-url="/admin/aufnahmen/antwort"{% endif %} style="margin-top:var(--space-6)">
+      <div class="panel-kicker">Antwort vom Kind</div>
+      <div class="panel-title">Eine Antwort für eine Person aufnehmen oder hochladen</div>
+      {% if vorlesende %}
+      <div class="field"><label for="antwort-person">Für wen?</label><select class="input" id="antwort-person" name="person_id">
+        {% for p in vorlesende %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      </select></div>
+      <div class="fixed-bottom im-panel">
+
+        <section data-state="idle" hidden>
+          <button type="button" class="rec-btn idle" data-role="record-btn">Aufnehmen</button>
+          <p class="rec-hint">Sprich die Antwort in Ruhe ein. Du kannst sie dir anhören und neu aufnehmen.</p>
+          <details class="setup-details upload-details">
+            <summary class="upload-toggle" aria-label="Oder eine fertige Datei hochladen">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4l-5 5h3.2v6h3.6V9H17zM5 17.5h14v2.5H5z" fill="currentColor"/></svg>
+              <span class="scroll-toggle-label" aria-hidden="true">Datei</span>
+            </summary>
+            <div class="upload-body">
+              <label class="drop">Datei wählen (mp3, m4a, wav, ogg …)<br><input type="file" name="file" accept="audio/*" data-role="file-input"></label>
+              <button type="button" class="btn btn-secondary" data-role="upload-btn" disabled>Hochladen und Mail schicken</button>
+            </div>
+          </details>
+        </section>
+
+        <section data-state="recording" hidden>
+          <span class="rec-halo"><button type="button" class="rec-btn live" data-role="stop-btn"><span>Fertig</span><span class="rec-time" data-role="timer">00:00</span></button></span>
+          <p class="rec-hint rec-hint-live">Läuft. Sprich einfach weiter.</p>
+        </section>
+
+        <section data-state="review" hidden>
+          <div class="rec-time" data-role="timer">00:00</div>
+          <div class="btn-stack">
+            <button type="button" class="btn btn-secondary" data-role="play-btn">▶ Anhören</button>
+            <button type="button" class="btn btn-secondary" data-role="rerecord-btn">Neu aufnehmen</button>
+            <button type="button" class="btn btn-primary" data-role="submit-btn">Speichern und Mail schicken</button>
+          </div>
+          <p class="note">Die Antwort geht an <span data-role="person-name">{{ vorlesende[0].name }}</span>. <span data-role="person-name">{{ vorlesende[0].name }}</span> bekommt eine Mail mit Link ins Archiv. Sie kommt nie auf den Tonie.</p>
+        </section>
+
+        <section data-state="interrupted" hidden>
+          <span class="tag tag-alert">Unterbrochen, Aufnahme erhalten</span>
+          <p class="rec-hint">Der Bildschirm wurde gesperrt oder du hast die Seite verlassen. An der Unterbrechungsstelle kann Material verfälscht sein. Hör einmal bis zum Ende, bevor du abschickst.</p>
+          <div class="rec-time" data-role="timer">00:00</div>
+          <div class="btn-stack">
+            <button type="button" class="btn btn-secondary" data-role="rerecord-btn">Neu aufnehmen</button>
+            <button type="button" class="btn btn-secondary" data-role="play-btn">▶ Bis zum Ende anhören</button>
+            <button type="button" class="btn btn-primary" data-role="submit-btn" disabled>Speichern und Mail schicken (erst nach vollständigem Anhören)</button>
+          </div>
+        </section>
+
+        <section data-state="uploading" hidden>
+          <div class="progress"><div data-role="progress-fill"></div></div>
+          <p class="rec-hint">Wird übertragen und aufbereitet. Bitte die Seite geöffnet lassen.</p>
+          <button type="button" class="btn btn-primary" disabled>Speichern und Mail schicken</button>
+        </section>
+
+        <section data-state="failed" hidden>
+          <span class="tag tag-alert">Übertragung fehlgeschlagen</span>
+          <p class="rec-hint" data-role="failed-reason">Die Übertragung ist fehlgeschlagen.</p>
+          <div class="btn-stack">
+            <button type="button" class="btn btn-secondary" data-role="play-btn">▶ Anhören</button>
+            <button type="button" class="btn btn-primary" data-role="retry-btn">Erneut versuchen</button>
+          </div>
+        </section>
+
+        <section data-state="denied" hidden class="center-card state-card">
+          <div class="badge warn">🎙</div>
+          <h3>Mikrofonzugriff nötig</h3>
+          <p class="meta">Dieser Browser hat den Mikrofonzugriff bisher verweigert. Erlaube ihn in den Einstellungen der Seite, dann lade sie neu. Eine fertige Datei geht trotzdem.</p>
+          <button type="button" class="btn btn-secondary" onclick="location.reload()">Seite neu laden</button>
+        </section>
+
+        <section data-state="embedded-browser" hidden class="center-card state-card">
+          <div class="badge warn">↗</div>
+          <h3>Dieser Browser kann hier nicht aufnehmen</h3>
+          <p class="meta">Öffne den Admin-Bereich über https in Safari oder Chrome.</p>
+        </section>
+
+        <section data-state="dead-end" hidden class="center-card state-card">
+          <div class="badge warn">✕</div>
+          <h3>Dieser Browser kann hier nicht aufnehmen</h3>
+          <p class="meta">Öffne den Admin-Bereich über https in Safari oder Chrome.</p>
+        </section>
+
+      </div>
+      {% else %}
+      <p class="meta">Noch liest niemand vor.</p>
+      {% endif %}
+      {% if antworten %}
+      <div class="panel-kicker" style="margin-top:var(--space-5)">Vorhandene Antworten</div>
+      <ul class="row-list">
+        {% for a in antworten %}
+        <li class="row-item">
+          <div class="row-head"><div><div class="row-title">{{ a.name }}</div><div class="row-sub">hochgeladen am {{ a.date }}</div></div></div>
+          <audio controls preload="none" style="width:100%" src="/admin/aufnahmen/antwort/{{ a.antwort.id }}/audio"></audio>
+          <form method="post" action="/admin/aufnahmen/antwort/{{ a.antwort.id }}/loeschen"><button type="submit" class="btn btn-ghost">Löschen</button></form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
   </div>
 
   {% if detail %}
@@ -84,7 +185,7 @@
           <div class="field"><label for="cut-end">Ende</label><input class="input" id="cut-end" name="cut_end" inputmode="decimal" placeholder="Ende der Aufnahme" value="{{ detail.cut_end }}" data-role="cut-end"></div>
         </div>
         <div class="btn-row-left" style="margin-top:var(--space-3)"><button type="submit" name="action" value="save" class="btn btn-secondary">Kapitelname &amp; Zuschnitt speichern</button><button type="submit" name="action" value="reset" class="btn btn-ghost">Zuschnitt zurücksetzen</button></div>
-        <p class="meta" style="margin-top:var(--space-2)">Die abgelegte Datei bleibt unverändert; geschnitten wird erst beim Aufspielen (R41).</p>
+        <p class="meta" style="margin-top:var(--space-2)">Die abgelegte Datei bleibt unverändert; geschnitten wird erst beim Aufspielen.</p>
       </div>
     </form>
     <hr class="div">
@@ -119,4 +220,5 @@
   {% endif %}
 </div>
 {% endblock %}
-{% block scripts %}<script src="/static/trim.js?v={{ asset_v }}" defer></script>{% endblock %}
+{% block scripts %}<script src="/static/trim.js?v={{ asset_v }}" defer></script>
+<script src="/static/recorder.js?v={{ asset_v }}" defer></script>{% endblock %}

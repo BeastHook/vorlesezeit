@@ -68,13 +68,14 @@ def send_reminder_mail(
     display_name: str,
     open_days: list[int],
     login_url: str,
+    person_id: int,
 ) -> None:
     message = build_reminder_message(
         to_address=to_address,
         display_name=display_name,
         open_days=open_days,
         login_url=login_url,
-        kind_name=settings.kind_name(session),
+        kind_name=settings.person_kind_name(session, person_id),
         sender_name=settings.admin_display_name(session),
     )
     send_message(config, session, message)

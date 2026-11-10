@@ -154,7 +154,11 @@ def create_app() -> FastAPI:
     # eigentliche, vollstaendige Pflichtvariablen-Pruefung (inkl.
     # SESSION_SECRET_KEY) bleibt in der lifespan, wie bei jeder anderen
     # Konfiguration auch.
-    app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SESSION_SECRET_KEY", "unset"))
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=os.environ.get("SESSION_SECRET_KEY", "unset"),
+        https_only=os.environ.get("SESSION_COOKIE_INSECURE") != "1",
+    )
     app.add_middleware(HerkunftMiddleware)
     app.include_router(auth_router)
     app.include_router(einrichtung_router)

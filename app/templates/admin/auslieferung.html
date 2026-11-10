@@ -15,7 +15,7 @@
 <div class="panel-grid">
   {% if campaign %}
   <form class="panel" method="post" action="/admin/auslieferung/jetzt">
-    <div class="panel-kicker">Nächster Lauf · täglich {{ delivery_time }} (aus den Einstellungen, R46)</div>
+    <div class="panel-kicker">Nächster Lauf · täglich {{ delivery_time }} (aus den Einstellungen)</div>
     {% if next_day %}
     <div class="panel-title">Türchen {{ next_day }}{% if next_title %} · {{ next_title }}{% endif %}</div>
     <p>
@@ -36,12 +36,12 @@
       <button type="submit" class="btn btn-primary btn-inline" data-busy="Wird gestartet …" data-done="Gestartet ✓">Jetzt aufspielen</button>
       <button type="submit" class="btn btn-secondary btn-inline" formaction="/admin/auslieferung/trockenlauf" data-busy="Wird gestartet …" data-done="Gestartet ✓">Trockenlauf</button>
     </div>
-    <p class="meta">Der Trockenlauf prüft Anmeldung, Formatvorprüfung und Übertragung, nicht die Verarbeitung auf dem Tonie (R45).</p>
+    <p class="meta">Der Trockenlauf prüft Anmeldung, Formatvorprüfung und Übertragung, nicht die Verarbeitung auf dem Tonie.</p>
   </form>
 
   <form class="panel" method="post" action="/admin/campaign/replacement">
     <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
-    <div class="panel-kicker">Ersatzbeitrag (R21) · {{ campaign.name }}</div>
+    <div class="panel-kicker">Ersatzbeitrag · {{ campaign.name }}</div>
     <div class="panel-title">{% if replacement_label %}„{{ replacement_label }}“{% else %}keiner hinterlegt{% endif %}</div>
     <p>Greift, wenn für den Folgetag nichts freigegeben ist oder die Verarbeitung den Tagesbeitrag verwirft.</p>
     {% if deliverable %}
@@ -59,7 +59,7 @@
 
   {% endif %}
   <div class="panel muted">
-    <div class="panel-kicker">Platz auf dem Tonie (R50)</div>
+    <div class="panel-kicker">Platz auf dem Tonie</div>
     {% if space %}
     <div class="panel-title" data-result="ok">Frei: {{ space.free_minutes }}</div>
     <p>Bestand: {{ space.stock_count }} Kapitel, {{ space.stock_minutes }}</p>
@@ -86,7 +86,7 @@
 
 {% if manual_targets %}
 <form class="panel" method="post" action="/admin/auslieferung/manuell" style="margin-bottom:var(--space-6)">
-  <div class="panel-kicker">Manueller Lauf mit mehreren Beiträgen (R20, R42)</div>
+  <div class="panel-kicker">Manueller Lauf mit mehreren Beiträgen</div>
   <p class="meta">Ankreuzen und Reihenfolge festlegen. Die Kapitel kommen vor den Bestand. Der nächste Vorabend-Lauf tauscht sie wieder gegen die Geschichte des Tages.</p>
   {% if deliverable %}
   <div class="field">

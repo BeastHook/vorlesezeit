@@ -238,6 +238,18 @@
   let uploadInFlight = false;
   let startingRecording = false;
 
+  // Admin-Panel "Antwort vom Kind": Auswahl der Person; die Saetze unter
+  // "Speichern" nennen die gewaehlte Person.
+  const personSelect = root.querySelector("[name='person_id']");
+  if (personSelect) {
+    personSelect.addEventListener("change", () => {
+      const name = personSelect.options[personSelect.selectedIndex].text;
+      root.querySelectorAll("[data-role='person-name']").forEach((el) => {
+        el.textContent = name;
+      });
+    });
+  }
+
   // M2 (Spec Advent-Design): ruhiger Lichtkranz im Takt der Stimme. Nur Darstellung;
   // scheitert irgendetwas, atmet der Kranz per CSS weiter und die Aufnahme laeuft.
   const halo = root.querySelector(".rec-halo");
@@ -461,6 +473,8 @@
     form.append("audio", recordedBlob, "aufnahme." + extension);
     form.append("reported_type", reportedType);
     form.append("title", currentTitle());
+    // Admin-Antwort vom Kind: die Auswahl "Fuer wen?" gilt zum Zeitpunkt des Sendens.
+    if (personSelect) form.append("person_id", personSelect.value);
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", submitUrl);

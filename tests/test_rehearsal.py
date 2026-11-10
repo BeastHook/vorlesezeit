@@ -165,3 +165,108 @@ def test_fill_refuses_calendar_that_already_holds_auftraege(db_session):
         rehearsal.fill(db_session, MemoryStorage(), tonie, now=NOW)
 
     assert "belegt" in str(exc.value)
+
+
+# --- nachholen (Job 040) ------------------------------------------------------
+
+
+def test_fill_nachholen_leaves_the_missed_day_unapproved(db_session):
+    campaign = create_campaign(db_session)
+    tonie = _add_tonie(db_session, TONIE_A, "Oma", campaign_id=campaign.id)
+    storage = MemoryStorage()
+
+    missed_id = rehearsal.fill_nachholen(db_session, storage, tonie, now=NOW)
+
+    day = rehearsal.NACHHOL_DAY
+    by_day = {}
+    for beitrag in db_session.scalars(select(Beitrag).where(Beitrag.auftrag_id.is_not(None))):
+        (slot,) = beitrag.auftrag.slots
+        by_day[slot.day] = beitrag
+    assert sorted(by_day) == [day, day + 1, day + 2]
+    assert by_day[day].id == missed_id
+    assert by_day[day].approved_at is None
+    assert all(by_day[d].approved_at is not None for d in (day + 1, day + 2))
+    assert [by_day[d].chapter_title for d in sorted(by_day)] == [
+        f"Tag {d}" for d in (day, day + 1, day + 2)
+    ]
+    replacement_id = db_session.get(Campaign, campaign.id).replacement_beitrag_id
+    assert db_session.get(Beitrag, replacement_id).approved_at is not None
+    assert set(storage.files) >= {b.audio_object_key for b in by_day.values()}
+
+
+def test_fill_nachholen_stores_audio_that_takes_the_rahmen(db_session):
+    """Roh erzeugte Probe-Toene liessen libmp3lame beim Rahmen abbrechen
+    (Generalprobe 2026-11-10: jeder Lauf "Ohne Rahmen"); im Betrieb sind
+    alle Dateien normalisiert, die Probe-Dateien muessen es also auch sein."""
+    from app.delivery.rahmen import mit_rahmen
+    from tests.test_delivery_rahmen import RahmenStorage
+
+    campaign = create_campaign(db_session)
+    tonie = _add_tonie(db_session, TONIE_A, "Oma", campaign_id=campaign.id)
+    storage = RahmenStorage({})
+
+    rehearsal.fill_nachholen(db_session, storage, tonie, now=NOW)
+
+    keys = [k for k in storage.objects if not k.startswith("rahmen/")]
+    assert keys
+    for key in keys:
+        assert mit_rahmen(db_session, storage, campaign, storage.objects[key])
+
+
+def test_fill_nachholen_refuses_calendar_that_already_holds_auftraege(db_session):
+    campaign = create_campaign(db_session)
+    tonie = _add_tonie(db_session, TONIE_A, "Oma", campaign_id=campaign.id)
+    slot = db_session.scalars(select(Slot).where(Slot.campaign_id == campaign.id)).first()
+    slot.auftrag = create_auftrag(db_session, title="Echte Geschichte")
+    db_session.commit()
+
+    with pytest.raises(SystemExit) as exc:
+        rehearsal.fill_nachholen(db_session, MemoryStorage(), tonie, now=NOW)
+
+    assert "belegt" in str(exc.value)
+
+
+def test_nachholen_sequence_passes_against_a_cloud_that_behaves(db_session):
+    from tests.test_delivery import STOCK, TONIE_ID, make_client
+    from tests.test_delivery_rahmen import FakeCloud, RahmenStorage
+
+    st.get_einstellungen(db_session).rahmen_aus = True
+    campaign = create_campaign(db_session)
+    tonie = _add_tonie(db_session, TONIE_ID, "Oma", campaign_id=campaign.id)
+    storage = RahmenStorage({})
+    missed_id = rehearsal.fill_nachholen(db_session, storage, tonie, now=NOW)
+    cloud = FakeCloud()
+    client = make_client(cloud.handler)
+    protocol = rehearsal.Protocol()
+
+    rehearsal.nachholen_sequence(db_session, client, storage, tonie, protocol)
+
+    assert protocol.unexplained_failures() == []
+    assert [s.name for s in protocol.steps] == [
+        "tag-5-ersatz",
+        "tag-5-freigabe",
+        "tag-6-nachgeholt",
+        "tag-7-abgeraeumt",
+    ]
+    assert db_session.get(Beitrag, missed_id).approved_at is not None
+    assert [c["title"] for c in cloud.chapters] == ["Tag 7", *(c["title"] for c in STOCK)]
+
+
+def test_nachholen_sequence_reports_a_missing_second_chapter(db_session, monkeypatch):
+    from tests.test_delivery import TONIE_ID, make_client
+    from tests.test_delivery_rahmen import FakeCloud, RahmenStorage
+
+    st.get_einstellungen(db_session).rahmen_aus = True
+    campaign = create_campaign(db_session)
+    tonie = _add_tonie(db_session, TONIE_ID, "Oma", campaign_id=campaign.id)
+    storage = RahmenStorage({})
+    rehearsal.fill_nachholen(db_session, storage, tonie, now=NOW)
+    client = make_client(FakeCloud().handler)
+    protocol = rehearsal.Protocol()
+    # Ohne Freigabe nach dem Ersatz-Lauf holt Job 040 nicht nach.
+    monkeypatch.setattr(rehearsal, "_approve_missed", lambda db, beitrag: None)
+
+    rehearsal.nachholen_sequence(db_session, client, storage, tonie, protocol)
+
+    failed = [s.name for s in protocol.unexplained_failures()]
+    assert "tag-6-nachgeholt" in failed

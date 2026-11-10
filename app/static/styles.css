@@ -413,6 +413,11 @@ input[type="checkbox"] {
   align-items: center;
   gap: var(--gap-leiste);
 }
+.fixed-bottom.im-panel {
+  position: relative;
+  background: none;
+  padding-top: var(--space-4);
+}
 /* Die Zustands-Abschnitte (idle/recording/review/...) sind die direkten
    Kinder -- ihr Inhalt muss selbst zentriert werden. */
 .fixed-bottom > section {

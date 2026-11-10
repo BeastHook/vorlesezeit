@@ -679,13 +679,14 @@ def test_confirmation_names_admin_and_story_title(person_client: TestClient, db_
 
 
 def test_confirmation_names_child(person_client: TestClient, db_session: Session):
-    from datetime import datetime
-
     from app import settings
 
     person = _current_person(db_session)
     _set_admin_name(db_session, "Luca")
-    settings.set_value(db_session, "kind_name", "Emma & Lukas", now=datetime(2026, 10, 4))
+    _calendar(db_session, "Familie").kind_name = "Emma & Lukas"
+    _calendar(db_session, "Patenkind").kind_name = "Paul"
+    settings.get_einstellungen(db_session).kind_name = "Alt"
+    db_session.commit()
     auftrag = _make_auftrag(db_session, person, day=3, title="Sterne zählen")
 
     person_client.post(
